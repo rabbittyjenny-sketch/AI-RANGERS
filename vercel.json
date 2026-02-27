@@ -9,10 +9,5 @@
   ],
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": "vite",
-  "env": {
-    "ANTHROPIC_API_KEY":  "@anthropic-api-key",
-    "ELEVENLABS_API_KEY": "@elevenlabs-api-key",
-    "VITE_DATABASE_URL":  "@database-url"
-  }
+  "framework": "vite"
 }
