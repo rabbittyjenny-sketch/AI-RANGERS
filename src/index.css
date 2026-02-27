@@ -1,0 +1,295 @@
+@import "tailwindcss";
+
+/* ── iDEAS365 x Social Factory — Global CSS ───────────────────────── */
+
+html,
+body {
+  background: #EFF2F9;
+  color: #334155;
+  margin: 0;
+  padding: 0;
+}
+
+/* Neumorphism Soft: bg #EFF2F9, shadow #d1d9e6 / #ffffff              */
+/* Font: Sarabun (TH) + Inter (EN) global enforcement                   */
+
+:root {
+  /* Neumorphism palette */
+  --neo-bg: #EFF2F9;
+  --neo-shadow-d: #d1d9e6;
+  --neo-shadow-l: #ffffff;
+  --neo-border: rgba(255, 255, 255, 0.6);
+
+  /* Text */
+  --text-heading: #334155;
+  /* slate-700 */
+  --text-body: #475569;
+  /* slate-600 */
+  --text-sub: #94a3b8;
+  /* slate-400 */
+
+  /* Brand */
+  --sapphire: #5E9BEB;
+  --sapphire-d: #4A7BC9;
+
+  /* Semantic */
+  --emerald: #10b981;
+  --rose: #f43f5e;
+  --amber: #f59e0b;
+  --indigo: #6366f1;
+
+  /* Radius */
+  --r-card: 28px;
+  --r-btn: 999px;
+  --r-chip: 12px;
+
+  /* Shadow tokens */
+  --shadow-neo: 6px 6px 16px var(--neo-shadow-d), -6px -6px 16px var(--neo-shadow-l);
+  --shadow-neo-sm: 3px 3px 8px var(--neo-shadow-d), -3px -3px 8px var(--neo-shadow-l);
+  --shadow-neo-in: inset 3px 3px 8px var(--neo-shadow-d), inset -3px -3px 8px var(--neo-shadow-l);
+  --shadow-neo-hover: 8px 8px 20px var(--neo-shadow-d), -8px -8px 20px var(--neo-shadow-l);
+
+  /* Font */
+  --font-th: 'Sarabun', sans-serif;
+  --font-en: 'Inter', sans-serif;
+}
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--neo-bg);
+  font-family: var(--font-th);
+  color: var(--text-body);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.6;
+}
+
+/* English text uses Inter */
+.font-en,
+[lang="en"],
+code,
+.mono {
+  font-family: var(--font-en);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--neo-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neo-shadow-d);
+  border-radius: 99px;
+}
+
+/* ── Neo Card ───────────────────────────────────────────────── */
+.neo-card {
+  background: var(--neo-bg);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-neo);
+  border: 1px solid var(--neo-border);
+}
+
+.neo-card-sm {
+  background: var(--neo-bg);
+  border-radius: 20px;
+  box-shadow: var(--shadow-neo-sm);
+  border: 1px solid var(--neo-border);
+}
+
+/* ── Neo Button ─────────────────────────────────────────────── */
+.neo-btn {
+  background: var(--neo-bg);
+  border-radius: var(--r-btn);
+  box-shadow: var(--shadow-neo-sm);
+  border: 1px solid var(--neo-border);
+  color: var(--text-body);
+  font-family: var(--font-th);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.neo-btn:hover {
+  box-shadow: var(--shadow-neo-hover);
+  transform: translateY(-1px);
+}
+
+.neo-btn:active {
+  box-shadow: var(--shadow-neo-in);
+  transform: translateY(0);
+}
+
+.neo-btn-primary {
+  background: var(--sapphire);
+  color: #fff;
+  box-shadow: 4px 4px 12px rgba(94, 155, 235, 0.35), -2px -2px 8px rgba(255, 255, 255, 0.6);
+}
+
+.neo-btn-primary:hover {
+  background: var(--sapphire-d);
+  box-shadow: 6px 6px 16px rgba(94, 155, 235, 0.4), -3px -3px 10px rgba(255, 255, 255, 0.5);
+}
+
+/* ── Neo Input ──────────────────────────────────────────────── */
+.neo-input {
+  background: var(--neo-bg);
+  border-radius: 16px;
+  box-shadow: var(--shadow-neo-in);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: var(--text-heading);
+  font-family: var(--font-th);
+  outline: none;
+  transition: box-shadow 0.18s ease;
+  width: 100%;
+  padding: 12px 16px;
+}
+
+.neo-input:focus {
+  box-shadow: inset 4px 4px 10px var(--neo-shadow-d), inset -4px -4px 10px var(--neo-shadow-l),
+    0 0 0 2px rgba(94, 155, 235, 0.25);
+}
+
+.neo-input::placeholder {
+  color: var(--text-sub);
+}
+
+/* ── App shell ──────────────────────────────────────────────── */
+.app-wrapper {
+  min-height: 100vh;
+  background: var(--neo-bg);
+}
+
+/* Header */
+.app-header {
+  background: var(--neo-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 2px 12px rgba(209, 217, 230, 0.6);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-content {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text-heading);
+  font-family: var(--font-en);
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.context-badge {
+  background: rgba(94, 155, 235, 0.1);
+  border: 1px solid rgba(94, 155, 235, 0.2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--sapphire);
+  font-family: var(--font-th);
+}
+
+.context-badge .badge-label {
+  color: var(--text-sub);
+  margin-right: 4px;
+}
+
+/* Main */
+.app-main {
+  flex: 1;
+}
+
+/* Footer */
+.app-footer {
+  text-align: center;
+  padding: 20px 24px;
+  font-size: 12px;
+  color: var(--text-sub);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  font-family: var(--font-en);
+}
+
+/* ── Utility ────────────────────────────────────────────────── */
+.text-heading {
+  color: var(--text-heading);
+  font-weight: 600;
+}
+
+.text-body {
+  color: var(--text-body);
+}
+
+.text-sub {
+  color: var(--text-sub);
+}
+
+.text-sapphire {
+  color: var(--sapphire);
+}
+
+/* Status dot */
+.dot-online {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--emerald);
+}
+
+.dot-warning {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+/* Cluster color vars */
+.cluster-strategy {
+  --c: #e85d5d;
+}
+
+.cluster-creative {
+  --c: #9061e5;
+}
+
+.cluster-growth {
+  --c: #059669;
+}

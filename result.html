@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caption Results</title>
+    <!-- LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;900&display=swap" rel="stylesheet">
+
+
+    <style>
+        /* Custom Colors & Fonts */
+        :root {
+            --neo-bg: #FFF7E1;
+            --neo-pink: #FF00FF;
+            --neo-yellow: #FFF000;
+            --neo-green: #00FF9D;
+            --neo-blue: #00D1FF;
+            --neo-black: #000000;
+        }
+
+        body {
+            background-color: var(--neo-bg);
+            font-family: 'Kanit', sans-serif;
+        }
+
+        .neo-border {
+            border: 2px solid var(--neo-black);
+        }
+
+        .bg-neo-yellow {
+            background-color: var(--neo-yellow);
+        }
+
+        .bg-neo-pink {
+            background-color: var(--neo-pink);
+        }
+
+        .bg-neo-green {
+            background-color: var(--neo-green);
+        }
+
+        .bg-neo-blue {
+            background-color: var(--neo-blue);
+        }
+
+        .text-neo-blue {
+            color: var(--neo-blue);
+        }
+
+        .text-neo-green {
+            color: var(--neo-green);
+        }
+
+        .text-neo-black {
+            color: var(--neo-black);
+        }
+
+        .shadow-neo {
+            box-shadow: 5px 5px 0px 0px var(--neo-black);
+        }
+
+        .shadow-neo-sm {
+            box-shadow: 3px 3px 0px 0px var(--neo-black);
+        }
+
+        .caption-card {
+            background-color: #FFFFFF;
+            transition: all 0.2s ease;
+        }
+
+        .caption-card.active {
+            background-color: #00FF9D !important;
+            transform: translate(2px, 2px);
+            box-shadow: none;
+            border-color: #000000;
+        }
+
+        .caption-card:hover:not(.active) {
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px 0px #000000;
+        }
+
+        .selectable-text {
+            user-select: text;
+            -webkit-user-select: text;
+            cursor: text;
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            background: #00FF9D;
+            color: #000;
+            padding: 20px 40px;
+            border: 3px solid #000;
+            box-shadow: 5px 5px 0px 0px #000;
+            font-weight: 900;
+            font-size: 18px;
+            z-index: 9999;
+            transition: transform 0.3s ease;
+        }
+
+        .toast.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        /* Toggle Switch */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: #E5E7EB;
+            border: 2px solid #000;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: #00FF9D;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: #000;
+            transition: 0.3s;
+        }
+
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(20px);
+        }
+
+        /* Fix Disabled Button State */
+        button:disabled {
+            background-color: #9CA3AF !important;
+            /* Gray-400 */
+            box-shadow: none !important;
+            transform: none !important;
+            cursor: not-allowed !important;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-4 flex flex-col items-center justify-center">
+
+    <div class="w-full max-w-md bg-white neo-border shadow-neo p-6 relative">
+
+        <!-- Header: Match App.jsx Design -->
+        <div class="text-center mb-8 relative pt-4">
+            <div style="position: absolute; top: -10px; right: 0; z-index: 10;">
+                <img src="ideas365-logo.png" alt="iDEAS365" style="height: 50px; width: auto;"
+                    onerror="this.style.display='none'">
+            </div>
+            <div class="flex items-center justify-center gap-4 mb-2">
+                <div
+                    class="w-[50px] h-[50px] border-[3px] border-black flex items-center justify-center shadow-[3px_3px_0_#000] -rotate-3 bg-neo-pink">
+                    <i data-lucide="camera" class="text-white w-7 h-7" stroke-width="2.5"></i>
+                </div>
+                <h1
+                    class="text-4xl font-black uppercase m-0 px-2 py-0 border-[3px] border-black shadow-[4px_4px_0_rgba(0,0,0,0.2)] rotate-1 tracking-tighter bg-neo-yellow">
+                    CAPTION FACTORY
+                </h1>
+            </div>
+        </div>
+
+        <p class="text-sm font-bold mb-2 uppercase text-center text-gray-700">
+            เลือกสไตล์ที่ชอบแล้วกด Copy ได้เลย!
+        </p>
+
+        <!-- Toggle Hashtags (Moved below subtitle, made smaller) -->
+        <div class="flex items-center justify-center mb-4 p-2 bg-gray-50 neo-border">
+            <span class="text-xs font-semibold uppercase mr-2">รวม Hashtags ด้วย?</span>
+            <div class="toggle-container">
+                <span id="toggle-status" class="text-xs font-semibold text-neo-green">ON</span>
+                <div id="toggle-hashtags" class="toggle-switch active" onclick="toggleHashtags()">
+                    <div class="toggle-slider"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Caption Options Container -->
+        <div id="captions-container" class="space-y-4">
+            <!-- Loading State -->
+            <div class="text-center py-10">
+                <div class="animate-spin w-10 h-10 border-4 border-neo-black border-t-transparent rounded-full mx-auto">
+                </div>
+                <p class="mt-4 font-bold">กำลังโหลดข้อมูล...</p>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="grid grid-cols-2 gap-4 mt-8">
+            <button id="btn-copy" onclick="copyCaption()" disabled
+                class="bg-neo-pink text-white neo-border py-4 font-black uppercase shadow-neo hover:shadow-neo-none hover:translate-x-[2px] hover:translate-y-[2px] active:bg-pink-600 transition-all flex items-center justify-center gap-2">
+                <i data-lucide="copy" class="w-5 h-5"></i>
+                <span id="btn-copy-text">COPY TEXT</span>
+            </button>
+
+            <button onclick="closeLiff()"
+                class="bg-white text-neo-black neo-border py-4 font-black uppercase shadow-neo hover:shadow-neo-none hover:translate-x-[2px] hover:translate-y-[2px] active:bg-gray-100 transition-all flex items-center justify-center gap-2">
+                <i data-lucide="x" class="w-6 h-6"></i>
+                EXIT
+            </button>
+        </div>
+
+        <!-- Footer: Match App.jsx -->
+        <div class="text-center text-[0.8rem] mt-8 text-[#888] font-semibold">
+            <p>© 2025 All Rights Reserved. | Curated by iDEAS365 x Generative AI</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <div class="flex items-center gap-3">
+            <i data-lucide="check-circle" class="w-6 h-6"></i>
+            <span>COPY แล้ว!</span>
+        </div>
+    </div>
+
+    <!-- Hidden Input for Copy -->
+    <textarea id="clipboard-target" class="fixed top-0 left-0 opacity-0 pointer-events-none"></textarea>
+
+    <script>
+        // --- Configuration ---
+        const LIFF_ID = "2008773306-Y0lRV4Wh";
+
+        let selectedIndex = null;
+        let captionsData = [];
+        let includeHashtags = true;
+
+        // --- Mock Data ---
+        const mockData = [
+            {
+                title: "VIBRANT VIBE ✨",
+                text: "วันนี้พักผ่อนที่ Yunomori Onsen ✨ เติมพลังกายและใจให้พร้อมสำหรับสัปดาห์ใหม่ บางทีสิ่งที่เราต้องการคือเวลาให้กับตัวเอง 💆‍♀️🌿",
+                hashtags: "#YunomoriOnsen #SelfCare #WellnessJourney"
+            },
+            {
+                title: "PROFESSIONAL 💼",
+                text: "Recharge mode: ON 🔋 เมื่อชีวิตเร่งรีบ เราก็ต้องหยุดพักบ้าง Yunomori Onsen คือที่ที่ทำให้ทุกอย่างช้าลง และให้เราได้กลับมาเป็นตัวเองอีกครั้ง",
+                hashtags: "#OnsenThailand #WellnessLifestyle #BangkokOnsen"
+            }
+        ];
+
+        // --- Initialize ---
+        window.onload = async function () {
+            lucide.createIcons();
+
+            try {
+                await liff.init({ liffId: LIFF_ID });
+                loadCaptions(mockData);
+            } catch (err) {
+                console.error("LIFF Init Error:", err);
+                loadCaptions(mockData);
+            }
+        };
+
+        // --- Render Functions ---
+        function loadCaptions(data) {
+            captionsData = data;
+            const container = document.getElementById('captions-container');
+            container.innerHTML = '';
+
+            data.forEach((item, index) => {
+                const card = document.createElement('div');
+                card.className = `caption-card neo-border shadow-neo p-4 cursor-pointer relative mb-4`;
+                card.onclick = (e) => {
+                    const selection = window.getSelection();
+                    if (selection.toString().length > 0) return;
+                    selectCaption(index);
+                };
+                card.id = `card-${index}`;
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2 pointer-events-none">
+                        <span class="text-xs font-black bg-white neo-border px-2 py-1 uppercase tracking-wider">${item.title}</span>
+                        <div id="check-${index}" class="hidden w-6 h-6 bg-black flex items-center justify-center border-2 border-black">
+                            <i data-lucide="check" class="w-4 h-4 text-white"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Caption text without bold -->
+                    <p class="selectable-text text-sm font-normal leading-relaxed mb-4 text-black" onclick="event.stopPropagation()">${item.text}</p>
+                    
+                    <!-- UPDATE: Thinner/Normal font for hashtags, removed 'blocky' look if any -->
+                    <p class="selectable-text text-sm font-normal text-gray-500 mt-2" onclick="event.stopPropagation()">${item.hashtags}</p>
+                `;
+                container.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        function selectCaption(index) {
+            selectedIndex = index;
+
+            document.querySelectorAll('.caption-card').forEach(el => {
+                el.classList.remove('active');
+                el.querySelector(`[id^="check-"]`).classList.add('hidden');
+            });
+
+            const activeCard = document.getElementById(`card-${index}`);
+            activeCard.classList.add('active');
+            document.getElementById(`check-${index}`).classList.remove('hidden');
+
+            const btn = document.getElementById('btn-copy');
+            btn.disabled = false;
+
+            document.getElementById('btn-copy-text').innerText = "COPY TEXT";
+            const icon = btn.querySelector('svg');
+            if (icon) icon.setAttribute('data-lucide', 'copy');
+
+            btn.classList.remove('bg-gray-400');
+            // Class handling for button state is now done via disabled attribute CSS mostly, but we trigger re-render
+
+            lucide.createIcons();
+        }
+
+        // --- Toggle Hashtags ---
+        function toggleHashtags() {
+            includeHashtags = !includeHashtags;
+            const toggle = document.getElementById('toggle-hashtags');
+            const status = document.getElementById('toggle-status');
+
+            if (includeHashtags) {
+                toggle.classList.add('active');
+                status.innerText = 'ON';
+                status.style.color = '#00FF9D';
+            } else {
+                toggle.classList.remove('active');
+                status.innerText = 'OFF';
+                status.style.color = '#9CA3AF';
+            }
+        }
+
+        // --- Action Functions ---
+        function copyCaption() {
+            if (selectedIndex === null) return;
+
+            const item = captionsData[selectedIndex];
+            let fullText = item.text;
+
+            if (includeHashtags && item.hashtags) {
+                fullText += `\n\n${item.hashtags}`;
+            }
+
+            const textArea = document.getElementById('clipboard-target');
+            textArea.value = fullText;
+            textArea.select();
+
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(fullText).then(onCopySuccess);
+                } else {
+                    document.execCommand('copy');
+                    onCopySuccess();
+                }
+            } catch (err) {
+                console.error('Failed to copy: ', err);
+                alert('Copy failed, please copy manually.');
+            }
+        }
+
+        function onCopySuccess() {
+            const toast = document.getElementById('toast');
+            toast.classList.add('show');
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2000);
+        }
+
+        function closeLiff() {
+            if (liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                alert("หน้าต่างนี้จะปิดลงเมื่อเปิดใน LINE เท่านั้น");
+            }
+        }
+    </script>
+</body>
+
+</html>

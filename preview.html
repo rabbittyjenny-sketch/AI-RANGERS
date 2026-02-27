@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caption Factory - Preview</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&display=swap"
+        rel="stylesheet">
+
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.292.0"
+        }
+    }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+    <script>
+        // Initialize LIFF
+        liff.init({ liffId: '2008773306' })
+            .then(() => {
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                }
+            })
+            .catch(err => console.error(err));
+    </script>
+
+    <style>
+        /* index.css CONTENT */
+        :root {
+            /* Color Palette */
+            --bg-main: #FFF7E1;
+            /* Cream */
+            --c-magenta: #FF00FF;
+            /* Primary Pop */
+            --c-yellow: #FFF000;
+            /* Action Yellow */
+            --c-green: #00FF9D;
+            /* Electric Green */
+            --c-cyan: #00D1FF;
+            /* Cyan Blue */
+            --c-black: #000000;
+            /* Solid Black */
+
+            --font-main: 'Outfit', system-ui, sans-serif;
+
+            --shadow-hard: 4px 4px 0px 0px var(--c-black);
+            --shadow-hard-hover: 6px 6px 0px 0px var(--c-black);
+            --border-black: 2px solid var(--c-black);
+            --radius-main: 12px;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--font-main);
+            background-color: var(--bg-main);
+            color: var(--c-black);
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        button {
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        /* Utilities for Neo-Brutalist Look */
+        .neo-box {
+            background: white;
+            border: var(--border-black);
+            box-shadow: var(--shadow-hard);
+            border-radius: var(--radius-main);
+        }
+
+        .neo-btn {
+            border: var(--border-black);
+            box-shadow: var(--shadow-hard);
+            border-radius: var(--radius-main);
+            transition: all 0.2s ease;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .neo-btn:hover:not(:disabled) {
+            transform: translate(-2px, -2px);
+            box-shadow: var(--shadow-hard-hover);
+        }
+
+        .neo-btn:active:not(:disabled) {
+            transform: translate(2px, 2px);
+            box-shadow: 0px 0px 0px 0px var(--c-black);
+        }
+
+        .neo-input {
+            width: 100%;
+            padding: 12px;
+            border: var(--border-black);
+            border-radius: var(--radius-main);
+            font-size: 1rem;
+            background: white;
+            outline: none;
+            transition: box-shadow 0.2s;
+        }
+
+        .neo-input:focus {
+            box-shadow: var(--shadow-hard);
+        }
+
+        /* App.css CONTENT */
+        .app-container {
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .main-card {
+            width: 100%;
+            max-width: 600px;
+            background: white;
+            padding: 2.5rem;
+            position: relative;
+        }
+
+        .header-section {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .title-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .icon-box {
+            width: 50px;
+            height: 50px;
+            border: var(--border-black);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 3px 3px 0 #000;
+            transform: rotate(-3deg);
+        }
+
+        .main-title {
+            font-size: 2.5rem;
+            font-weight: 900;
+            margin: 0;
+            text-transform: uppercase;
+            background: var(--c-yellow);
+            padding: 0 10px;
+            border: var(--border-black);
+            box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+            transform: rotate(1deg);
+            letter-spacing: -1px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-weight: 600;
+            margin-top: 1rem;
+        }
+
+        .section-block {
+            margin-bottom: 2rem;
+        }
+
+        .section-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .upload-area {
+            border: 2px dashed #000;
+            background: #fafafa;
+            border-radius: var(--radius-main);
+            cursor: pointer;
+            transition: all 0.2s;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .upload-area.empty {
+            padding: 3rem;
+            text-align: center;
+        }
+
+        .upload-area:hover {
+            background: #f0f0f0;
+            border-color: var(--c-magenta);
+        }
+
+        .preview-container {
+            width: 100%;
+            border-radius: var(--radius-main);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .preview-img {
+            width: 100%;
+            display: block;
+        }
+
+        .preview-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .upload-area:hover .preview-overlay {
+            opacity: 1;
+        }
+
+        /* Mood Grid */
+        .mood-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        @media (min-width: 500px) {
+            .mood-grid {
+                grid-template-columns: repeat(5, 1fr);
+            }
+        }
+
+        .mood-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 5px;
+            height: 80px;
+            font-size: 0.8rem;
+        }
+
+        .mood-emoji {
+            font-size: 1.5rem;
+            margin-bottom: 4px;
+        }
+
+        /* Slider */
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .level-badge {
+            padding: 4px 12px;
+            font-weight: 800;
+            border: 2px solid #000;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            box-shadow: 2px 2px 0 #000;
+        }
+
+        .slider-wrapper {
+            padding: 0 10px;
+        }
+
+        .custom-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 12px;
+            background: #000;
+            border-radius: 99px;
+            outline: none;
+            margin-bottom: 10px;
+        }
+
+        .custom-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: var(--c-magenta);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 0 2px #000;
+        }
+
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #666;
+        }
+
+        /* Submit Button */
+        .submit-btn {
+            width: 100%;
+            padding: 1.25rem;
+            background: var(--c-magenta);
+            color: white;
+            font-size: 1.2rem;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 1rem;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            background: #e600e6;
+        }
+
+        .submit-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: var(--shadow-hard);
+        }
+
+        .footer-copyright {
+            text-align: center;
+            font-size: 0.8rem;
+            margin-top: 2rem;
+            color: #888;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { Camera, Sparkles, Loader2, Zap, Image as ImageIcon } from 'lucide-react';
+
+        const CaptionFactoryResult = ({ onBack, results }) => {
+            const [selectedCaption, setSelectedCaption] = useState(null);
+            const [copied, setCopied] = useState(false);
+
+            // Mock Data if no results passed
+            const captions = results || [
+                {
+                    id: 1,
+                    text: "วันนี้พักผ่อนที่ Yunomori Onsen ✨ เติมพลังกายและใจให้พร้อมสำหรับสัปดาห์ใหม่ บางทีสิ่งที่เราต้องการคือเวลาให้กับตัวเอง",
+                    hashtags: "#YunomoriOnsen #SelfCare #Wellness"
+                },
+                {
+                    id: 2,
+                    text: "Recharge mode: ON 🔋 เมื่อชีวิตเร่งรีบ เราก็ต้องหยุดพักบ้าง ให้ชีวิตได้ช้าลงที่นี่",
+                    hashtags: "#OnsenThailand #RelaxTime #MeTime"
+                }
+            ];
+
+            const handleCopy = (index) => {
+                const fullText = `${captions[index].text}\n\n${captions[index].hashtags}`;
+                navigator.clipboard.writeText(fullText);
+                setSelectedCaption(index);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            };
+
+            return (
+                <div className="app-container">
+                    <div className="main-card neo-box" style={{ padding: '2rem' }}>
+
+                        {/* Header */}
+                        <div style={{
+                            background: 'var(--c-yellow)',
+                            border: 'var(--border-black)',
+                            padding: '1rem',
+                            marginBottom: '1.5rem',
+                            boxShadow: '4px 4px 0 rgba(0,0,0,1)',
+                            textAlign: 'center',
+                            position: 'relative'
+                        }}>
+                            <h1 style={{
+                                fontSize: '1.5rem',
+                                fontWeight: '900',
+                                margin: 0,
+                                textTransform: 'uppercase',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.5rem'
+                            }}>
+                                <Sparkles size={24} /> CAPTION RESULTS
+                            </h1>
+                        </div>
+
+                        <p style={{ fontWeight: '700', marginBottom: '1rem', textTransform: 'uppercase' }}>เลือกแคปชั่นที่ชอบได้เลย :</p>
+
+                        {/* Caption Cards */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {captions.map((item, index) => (
+                                <div
+                                    key={item.id}
+                                    onClick={() => setSelectedCaption(index)}
+                                    style={{
+                                        padding: '1rem',
+                                        border: 'var(--border-black)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        background: selectedCaption === index ? 'var(--c-green)' : 'white',
+                                        boxShadow: selectedCaption === index ? 'none' : 'var(--shadow-hard)',
+                                        transform: selectedCaption === index ? 'translate(2px, 2px)' : 'none'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (selectedCaption !== index) {
+                                            e.currentTarget.style.transform = 'translate(-1px, -1px)';
+                                            e.currentTarget.style.boxShadow = 'var(--shadow-hard-hover)';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (selectedCaption !== index) {
+                                            e.currentTarget.style.transform = 'none';
+                                            e.currentTarget.style.boxShadow = 'var(--shadow-hard)';
+                                        }
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                                        <span style={{
+                                            fontSize: '0.75rem',
+                                            fontWeight: '900',
+                                            background: 'white',
+                                            border: '2px solid black',
+                                            padding: '2px 8px'
+                                        }}>OPTION {index + 1}</span>
+                                        {selectedCaption === index && <div style={{ background: 'black', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={14} color="white" /></div>}
+                                    </div>
+                                    <p style={{ fontSize: '0.95rem', fontWeight: '600', lineHeight: '1.4', margin: '0 0 0.5rem 0' }}>{item.text}</p>
+                                    <p style={{ fontSize: '0.85rem', color: '#666', fontWeight: '600', margin: 0 }}>{item.hashtags}</p>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '2rem' }}>
+                            <button
+                                onClick={() => selectedCaption !== null && handleCopy(selectedCaption)}
+                                disabled={selectedCaption === null}
+                                className="neo-btn"
+                                style={{
+                                    background: 'var(--c-magenta)',
+                                    color: 'white',
+                                    padding: '1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem',
+                                    opacity: selectedCaption === null ? 0.5 : 1,
+                                    cursor: selectedCaption === null ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {copied ? <Check size={18} /> : <span>📄</span>}
+                                {copied ? 'COPIED!' : 'COPY'}
+                            </button>
+
+                            <button
+                                onClick={onBack}
+                                className="neo-btn"
+                                style={{
+                                    background: 'white',
+                                    color: 'black',
+                                    padding: '1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem'
+                                }}
+                            >
+                                <span>❌</span> EXIT
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('upload'); // 'upload' | 'result'
+            const [generatedResults, setGeneratedResults] = useState(null);
+
+            const handleUploadSuccess = (data) => {
+                // In a real app, 'data' would be the response from the API
+                // For demo, we can just switch views
+                // setGeneratedResults(data); 
+                setTimeout(() => {
+                    setView('result');
+                }, 1500); // Small delay to show "Processing" state in Upload component
+            };
+
+            return (
+                <>
+                    {view === 'upload' && <CaptionFactoryUpload onSuccess={handleUploadSuccess} />}
+                    {view === 'result' && <CaptionFactoryResult onBack={() => setView('upload')} results={generatedResults} />}
+                </>
+            );
+        };
+
+        // Modify CaptionFactoryUpload to accept prompt and trigger onSuccess
+        // redefining component here to ensure it catches the prop
+        const CaptionFactoryUpload = ({ onSuccess }) => {
+            const [image, setImage] = useState(null);
+            const [imagePreview, setImagePreview] = useState(null);
+            const [imageBase64, setImageBase64] = useState(null);
+            const [checkIn, setCheckIn] = useState('');
+            const [mood, setMood] = useState('VIBRANT');
+            const [multilingualLevel, setMultilingualLevel] = useState(50);
+            const [captionText, setCaptionText] = useState('');
+            const [loading, setLoading] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const moods = [
+                { id: 'VIBRANT', label: 'Vibrant', emoji: '✨', color: 'var(--c-magenta)' },
+                { id: 'CALM', label: 'Calm', emoji: '🌊', color: 'var(--c-cyan)' },
+                { id: 'FUN', label: 'Fun', emoji: '🎉', color: 'var(--c-yellow)' },
+                { id: 'LUXURY', label: 'Luxury', emoji: '👑', color: '#9d4edd' },
+                { id: 'AESTHETIC', label: 'Aesthetic', emoji: '🎨', color: 'var(--c-green)' }
+            ];
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 10 * 1024 * 1024) {
+                        alert('ขนาดไฟล์ใหญ่เกิน 10MB กรุณาเลือกไฟล์ที่เล็กกว่า');
+                        return;
+                    }
+
+                    setImage(file);
+
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const result = reader.result;
+                        setImagePreview(result);
+                        const base64String = result.split(',')[1];
+                        setImageBase64(base64String);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const getMultilingualLabel = () => {
+                if (multilingualLevel < 25) return 'Light';
+                if (multilingualLevel < 50) return 'Medium';
+                if (multilingualLevel < 75) return 'High';
+                return 'Heavy';
+            };
+
+            const handleSubmit = async () => {
+                if (!image || !imageBase64) {
+                    alert('กรุณาอัพโหลดรูปภาพก่อนค่ะ 📸');
+                    return;
+                }
+
+                setLoading(true);
+
+                try {
+                    // Optional LIFF integration
+                    let userId = 'web-user';
+                    let displayName = 'Web User';
+
+                    if (window.liff && window.liff.isLoggedIn()) {
+                        try {
+                            const profile = await window.liff.getProfile();
+                            userId = profile.userId;
+                            displayName = profile.displayName;
+                        } catch (liffError) {
+                            console.warn('LIFF profile fetch failed, using defaults:', liffError);
+                        }
+                    }
+
+                    const webhookData = {
+                        userId: userId,
+                        displayName: displayName,
+                        image: imageBase64,
+                        check_in: checkIn,
+                        mood: mood,
+                        user_words: captionText,
+                        multilingual_level: multilingualLevel,
+                        timestamp: new Date().toISOString()
+                    };
+
+                    const WEBHOOK_URL = 'https://hook.us2.make.com/e7yel6e6t3ouyf8sv3dbni25nap685tf';
+
+                    // For demo purposes, we will simulate a successful call if the fetch fails (common in preview environments due to CORS)
+                    // Or we just proceed to onSuccess
+
+                    /* 
+                    // Real implementation
+                    const response = await fetch(WEBHOOK_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(webhookData)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to process');
+                    }
+                    */
+
+                    // Simulate success for UI preview
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+
+                    if (onSuccess) {
+                        onSuccess();
+                    } else {
+                        alert('✨ ขอบคุณค่ะ! (No handler)');
+                    }
+
+                    setLoading(false);
+                } catch (error) {
+                    console.error('Error:', error);
+                    // alert('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งค่ะ 🙏\n' + error.message);
+
+                    // Fallback for demo if fetch fails
+                    if (onSuccess) onSuccess();
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="app-container">
+                    <div className="main-card neo-box">
+                        {/* Header */}
+                        <div className="header-section" style={{ position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: '-10px', right: '0', zIndex: 10 }}>
+                                <img src="ideas365-logo.png" alt="iDEAS365" style={{ height: '50px', width: 'auto' }} />
+                            </div>
+                            <div className="title-wrapper">
+                                <div className="icon-box" style={{ background: 'var(--c-magenta)' }}>
+                                    <Camera size={28} color="white" strokeWidth={2.5} />
+                                </div>
+                                <h1 className="main-title">CAPTION FACTORY</h1>
+                            </div>
+                        </div>
+
+                        <div className="section-block">
+                            <label className="section-label">
+                                <Camera size={20} />
+                                อัพโหลดรูปภาพ
+                            </label>
+                            <div
+                                onClick={() => fileInputRef.current?.click()}
+                                className={`upload-area ${!imagePreview ? 'empty' : ''}`}
+                            >
+                                {imagePreview ? (
+                                    <div className="preview-container">
+                                        <img src={imagePreview} alt="Preview" className="preview-img" />
+                                        <div className="preview-overlay">
+                                            <span className="neo-btn" style={{ background: 'var(--c-yellow)', fontSize: '0.8rem', padding: '8px 16px' }}>
+                                                คลิกเพื่อเปลี่ยนรูป
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="upload-placeholder">
+                                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                            <ImageIcon size={48} color="#000" strokeWidth={1} style={{ marginBottom: '1rem' }} />
+                                        </div>
+                                        <p style={{ fontWeight: 600, margin: 0 }}>คลิกเพื่ออัพโหลดรูป</p>
+                                        <p style={{ fontSize: '0.8rem', opacity: 0.6, margin: '5px 0 0 0' }}>JPG, PNG (สูงสุด 10MB)</p>
+                                    </div>
+                                )}
+                            </div>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/jpeg,image/jpg,image/png"
+                                onChange={handleImageUpload}
+                                style={{ display: 'none' }}
+                            />
+                        </div>
+
+                        <div className="section-block">
+                            <label className="section-label">
+                                <Sparkles size={20} />
+                                Mood & Vibe
+                            </label>
+                            <div className="mood-grid">
+                                {moods.map((m) => (
+                                    <button
+                                        key={m.id}
+                                        onClick={() => setMood(m.id)}
+                                        className="mood-btn neo-btn"
+                                        style={{
+                                            background: mood === m.id ? m.color : '#fff',
+                                            transform: mood === m.id ? 'translate(-2px, -2px)' : 'none',
+                                            boxShadow: mood === m.id ? 'var(--shadow-hard-hover)' : 'var(--shadow-hard)'
+                                        }}
+                                    >
+                                        <span className="mood-emoji">{m.emoji}</span>
+                                        <span className="mood-label">{m.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="section-block">
+                            <div className="label-row">
+                                <label className="section-label">
+                                    <Zap size={20} />
+                                    Multilingual Level
+                                </label>
+                                <span className="level-badge" style={{ background: 'var(--c-green)' }}>
+                                    {getMultilingualLabel()}
+                                </span>
+                            </div>
+
+                            <div className="slider-wrapper">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    step="25"
+                                    value={multilingualLevel}
+                                    onChange={(e) => setMultilingualLevel(parseInt(e.target.value))}
+                                    className="custom-slider"
+                                />
+                                <div className="slider-labels">
+                                    <span>Light</span>
+                                    <span>Medium</span>
+                                    <span>High</span>
+                                    <span>Heavy</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="section-block">
+                            <label className="section-label">
+                                Your text in caption <span style={{ opacity: 0.5, marginLeft: '5px' }}>(optional)</span>
+                            </label>
+                            <textarea
+                                value={captionText}
+                                onChange={(e) => setCaptionText(e.target.value)}
+                                placeholder="ใส่ข้อความที่อยากให้มีในแคปชั่น เช่น กาแฟดี, relax, weekend..."
+                                rows="3"
+                                className="neo-input"
+                            />
+                        </div>
+
+                        <button
+                            onClick={handleSubmit}
+                            disabled={loading || !image}
+                            className="submit-btn neo-btn"
+                        >
+                            {loading ? (
+                                <>
+                                    <Loader2 className="animate-spin" />
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    <Sparkles />
+                                    LET'S GO!
+                                </>
+                            )}
+                        </button>
+
+                        <div className="footer-copyright">
+                            <p>© 2025 All Rights Reserved. | Curated by iDEAS365 x Generative AI</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

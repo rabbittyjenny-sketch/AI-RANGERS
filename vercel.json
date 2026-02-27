@@ -1,0 +1,18 @@
+{
+  "functions": {
+    "api/anthropic.js": { "maxDuration": 30 },
+    "api/elevenlabs.js": { "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/api/anthropic/v1/:path*", "destination": "/api/anthropic" },
+    { "source": "/api/elevenlabs/:path*",   "destination": "/api/elevenlabs" }
+  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "env": {
+    "ANTHROPIC_API_KEY":  "@anthropic-api-key",
+    "ELEVENLABS_API_KEY": "@elevenlabs-api-key",
+    "VITE_DATABASE_URL":  "@database-url"
+  }
+}
