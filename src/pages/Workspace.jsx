@@ -511,7 +511,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [outputs, setOutputs] = useState(() => {
         try { return JSON.parse(localStorage.getItem('ranger_outputs') || '[]'); } catch { return []; }
     });
-    const [rightPanelOpen, setRightPanelOpen] = useState(false);
+    const [rightPanelOpen, setRightPanelOpen] = useState(true);
     const [showComingSoon, setShowComingSoon] = useState(false);
     const [showGuidebook, setShowGuidebook] = useState(false);
     const [showBrandModal, setShowBrandModal] = useState(false);
@@ -874,14 +874,6 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                                         </div>
                                         <p style={{ fontWeight: 700, fontSize: '0.95rem', color: '#475569', marginBottom: 8 }}>เลือก Ranger เพื่อเริ่มต้น</p>
                                         <p style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 260, lineHeight: 1.75 }}>คลิก Ranger ในรายการด้านซ้ายเพื่อเริ่มบทสนทนา</p>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, justifyContent: 'center', marginTop: 18 }}>
-                                            {RANGERS.filter(r => !r.comingSoon).slice(0, 3).map(r => (
-                                                <button key={r.id} onClick={() => handleSelectRanger(r)}
-                                                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 13px', borderRadius: 99, border: `1px solid ${r.color}25`, background: BG, cursor: 'pointer', color: r.color, fontSize: '0.76rem', fontWeight: 600, ...NEU.raisedXs }}>
-                                                    <img src={r.img} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} /> {r.name}
-                                                </button>
-                                            ))}
-                                        </div>
                                     </div>
                                 ) : currentMessages.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '0.8rem' }}>กำลังโหลด...</div>
