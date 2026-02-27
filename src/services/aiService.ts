@@ -370,15 +370,17 @@ class AIService {
   }
 
   // ── extractOutputs ────────────────────────────────────────────────────────
+  // จับเฉพาะเนื้อหาที่ agent ครอบด้วย [WORKFILE: ชื่อ]...[/WORKFILE] เท่านั้น
   private extractOutputs(text: string, agentName: string) {
     const outputs: Array<{ id: string; type: string; title: string; content: string; agentName: string }> = [];
-    // ถ้าตอบยาวกว่า 400 chars และมี structure ชัดเจน → ถือว่าเป็น document
-    if (text.length > 400 && (text.includes('##') || text.includes('```') || text.includes('1.'))) {
+    const tagRegex = /\[WORKFILE:\s*(.+?)\]\s*([\s\S]*?)\s*\[\/WORKFILE\]/g;
+    let match;
+    while ((match = tagRegex.exec(text)) !== null) {
       outputs.push({
-        id: `out_${Date.now()}`,
+        id: `out_${Date.now()}_${outputs.length}`,
         type: 'document',
-        title: `ผลงานจาก${agentName}`,
-        content: text,
+        title: match[1].trim(),
+        content: match[2].trim(),
         agentName,
       });
     }

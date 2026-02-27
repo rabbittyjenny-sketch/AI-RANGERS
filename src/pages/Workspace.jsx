@@ -80,7 +80,10 @@ const renderInline = (text) => {
 };
 const MarkdownText = ({ text }) => {
     if (!text) return null;
-    const lines = text.split('\n'); const els = []; let k = 0;
+    // Strip [WORKFILE:...]...[/WORKFILE] blocks from chat display — they go to Panel 3 only
+    const hasWorkfile = /\[WORKFILE:[\s\S]*?\[\/WORKFILE\]/i.test(text);
+    const cleaned = text.replace(/\[WORKFILE:[^\]]*\][\s\S]*?\[\/WORKFILE\]/g, '').trim();
+    const lines = cleaned.split('\n'); const els = []; let k = 0;
     for (const line of lines) {
         if (line.startsWith('### ')) els.push(<div key={k++} style={{ fontWeight: 700, color: '#1e293b', margin: '12px 0 4px', fontSize: '0.85rem' }}>{renderInline(line.slice(4))}</div>);
         else if (line.startsWith('## ')) els.push(<div key={k++} style={{ fontWeight: 700, color: '#1e293b', margin: '12px 0 4px', fontSize: '0.9rem' }}>{renderInline(line.slice(3))}</div>);
@@ -90,7 +93,16 @@ const MarkdownText = ({ text }) => {
         else if (line.trim() === '') els.push(<div key={k++} style={{ height: 4 }} />);
         else els.push(<div key={k++} style={{ margin: '2px 0', lineHeight: 1.65 }}>{renderInline(line)}</div>);
     }
-    return <div style={{ fontSize: '0.85rem', color: '#475569' }}>{els}</div>;
+    return (
+        <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+            {els}
+            {hasWorkfile && (
+                <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 5, background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', color: '#3b82f6', fontWeight: 600 }}>
+                    📁 บันทึกลงไฟล์งานแล้ว
+                </div>
+            )}
+        </div>
+    );
 };
 
 /* ═══════════════════════════════════════════════════
@@ -511,7 +523,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [outputs, setOutputs] = useState(() => {
         try { return JSON.parse(localStorage.getItem('ranger_outputs') || '[]'); } catch { return []; }
     });
-    const [rightPanelOpen, setRightPanelOpen] = useState(false);
+    const [rightPanelOpen, setRightPanelOpen] = useState(true);
     const [showComingSoon, setShowComingSoon] = useState(false);
     const [showGuidebook, setShowGuidebook] = useState(false);
     const [showBrandModal, setShowBrandModal] = useState(false);
@@ -874,14 +886,6 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                                         </div>
                                         <p style={{ fontWeight: 700, fontSize: '0.95rem', color: '#475569', marginBottom: 8 }}>เลือก Ranger เพื่อเริ่มต้น</p>
                                         <p style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 260, lineHeight: 1.75 }}>คลิก Ranger ในรายการด้านซ้ายเพื่อเริ่มบทสนทนา</p>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, justifyContent: 'center', marginTop: 18 }}>
-                                            {RANGERS.filter(r => !r.comingSoon).slice(0, 3).map(r => (
-                                                <button key={r.id} onClick={() => handleSelectRanger(r)}
-                                                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 13px', borderRadius: 99, border: `1px solid ${r.color}25`, background: BG, cursor: 'pointer', color: r.color, fontSize: '0.76rem', fontWeight: 600, ...NEU.raisedXs }}>
-                                                    <img src={r.img} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} /> {r.name}
-                                                </button>
-                                            ))}
-                                        </div>
                                     </div>
                                 ) : currentMessages.length === 0 ? (
                                     <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '0.8rem' }}>กำลังโหลด...</div>
