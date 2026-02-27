@@ -167,6 +167,26 @@ export class OrchestratorEngine {
       message: longEnough ? `ความยาวเหมาะสม (${text.length} chars)` : `สั้นเกินไป (${text.length} chars)`,
     });
 
+    // CHECK 5: IP Protection — ตรวจ trademark plagiarism
+    const plagiarismResult = this.checkPlagiarismAndTrademark(text);
+    if (!plagiarismResult.passed) {
+      plagiarismResult.issues.forEach(issue => {
+        issues.push({ severity: 'warning', message: issue });
+        checklist.push({ rule: 'NO_TRADEMARK', passed: false, severity: 'warning', message: issue });
+      });
+    } else {
+      checklist.push({ rule: 'NO_TRADEMARK', passed: true, severity: 'info', message: 'ไม่พบ trademark ของแบรนด์อื่น' });
+    }
+
+    // CHECK 6: Art Style Protection — ป้องกันการละเมิดลิขสิทธิ์ศิลปิน
+    const artStyleResult = this.checkArtStyleProtection(text);
+    if (!artStyleResult.passed) {
+      issues.push({ severity: 'warning', message: artStyleResult.reason });
+      checklist.push({ rule: 'NO_ARTIST_IP', passed: false, severity: 'warning', message: artStyleResult.reason });
+    } else {
+      checklist.push({ rule: 'NO_ARTIST_IP', passed: true, severity: 'info', message: 'ไม่พบการอ้าง art style ที่มีลิขสิทธิ์' });
+    }
+
     const criticalFails = issues.filter(i => i.severity === 'critical').length;
     const score = Math.max(0, 100 - criticalFails * 40 - issues.filter(i => i.severity === 'warning').length * 15);
 
