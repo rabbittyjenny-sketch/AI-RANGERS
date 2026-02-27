@@ -93,10 +93,32 @@ class AIService {
     //    - ถ้าไม่มี ใช้ in-memory chatHistories
     const messages = this.buildMessages(agentId, text, contextMsg, history);
 
-    // 6. Call Claude API
+    // 6. Route → Call Claude API → Validate (Orchestrator fully integrated)
     let responseText: string;
     try {
+      // 6a. Log Orchestrator routing decision (ไม่ override user selection)
+      const routingResult = orchestratorEngine.route(text);
+      if (routingResult.primaryAgent && routingResult.primaryAgent !== agentId) {
+        console.info(`[Orchestrator] Routing suggests '${routingResult.primaryAgent}' but user selected '${agentId}' — respecting user choice`);
+      }
+
+      // 6b. Call Claude API with full brand context in system prompt
       responseText = await this.callClaudeAPI(agent, messages, contextMsg);
+
+      // 6c. Validate output quality through Orchestrator
+      const validation = orchestratorEngine.validate(agentId, responseText);
+      if (!validation.passed) {
+        const criticals = validation.issues.filter(i => i.severity === 'critical');
+        if (criticals.length > 0) {
+          console.warn(`[Orchestrator] Critical validation failed for '${agentId}':`, criticals.map(i => i.message));
+          // ถ้า output ว่างเปล่าหรือไม่มีเนื้อหา → ใช้ fallback
+          if (criticals.some(i => i.message.includes('ว่างเปล่า'))) {
+            responseText = this.buildFallbackResponse(agentId, text, ctx);
+          }
+        } else {
+          console.info(`[Orchestrator] Validation warnings for '${agentId}':`, validation.issues.map(i => i.message));
+        }
+      }
     } catch (err: any) {
       // Graceful fallback
       console.error('[AIService] API error:', err.message);
