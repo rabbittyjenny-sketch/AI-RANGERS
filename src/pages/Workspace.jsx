@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { getAllAgents } from '../data/agents';
 import { aiService } from '../services/aiService';
+import { databaseService } from '../services/databaseService';
 
 /* ═══════════════════════════════════════════════════
    CONSTANTS
@@ -262,7 +263,9 @@ const OutputCard = ({ output, index }) => {
 const emptyBrand = () => ({
     id: Date.now() + Math.random(),
     name: '', nameEn: '', industry: '', industryOther: '',
-    usp: '', audience: '', tone: 'professional'
+    usp: '', audience: '', tone: 'professional',
+    competitors: '', painPoints: '', targetPersona: '',
+    forbiddenWords: '', primaryColor: '#5E9BEB', moodKeywords: '',
 });
 
 const BrandPopupModal = ({ brands, activeBrandIdx, onSave, onClose }) => {
@@ -291,6 +294,25 @@ const BrandPopupModal = ({ brands, activeBrandIdx, onSave, onClose }) => {
 
     const handleSave = () => {
         onSave(localBrands, activeIdx);
+        // Sync ทุก brand ไป Neon DB (fire-and-forget)
+        localBrands.forEach(b => {
+            if (!b.name) return;
+            const ind = b.industry === 'other' ? (b.industryOther || 'other') : (b.industry || 'other');
+            databaseService.saveBrand({
+                brandNameTh: b.name,
+                brandNameEn: b.nameEn || b.name,
+                industry: ind,
+                coreUsp: b.usp ? b.usp.split(',').map(s => s.trim()).filter(Boolean) : [],
+                competitors: b.competitors ? b.competitors.split(',').map(s => s.trim()).filter(Boolean) : [],
+                targetAudience: b.audience || '',
+                targetPersona: b.targetPersona || '',
+                painPoints: b.painPoints ? b.painPoints.split(',').map(s => s.trim()).filter(Boolean) : [],
+                toneOfVoice: b.tone || 'professional',
+                forbiddenWords: b.forbiddenWords ? b.forbiddenWords.split(',').map(s => s.trim()).filter(Boolean) : [],
+                primaryColor: b.primaryColor || '#5E9BEB',
+                moodKeywords: b.moodKeywords ? b.moodKeywords.split(',').map(s => s.trim()).filter(Boolean) : [],
+            }).catch(() => {});
+        });
         setSaved(true);
         setTimeout(() => { setSaved(false); onClose(); }, 800);
     };
@@ -393,6 +415,34 @@ const BrandPopupModal = ({ brands, activeBrandIdx, onSave, onClose }) => {
                                 {t}
                             </button>
                         ))}
+                    </div>
+
+                    {/* ── Extended Brand Fields ── */}
+                    <label style={S.label}>คู่แข่งหลัก (ถ้ามี)</label>
+                    <div style={S.wrap}><input style={S.inp} value={brand.competitors || ''} onChange={e => updateField('competitors', e.target.value)} placeholder="เช่น ร้าน A, ร้าน B (คั่นด้วยจุลภาค)" /></div>
+
+                    <label style={S.label}>ปัญหาที่ลูกค้าเจอ (Pain Points)</label>
+                    <div style={S.wrap}><input style={S.inp} value={brand.painPoints || ''} onChange={e => updateField('painPoints', e.target.value)} placeholder="เช่น หาคุณภาพดีราคาไม่แพงยาก, ไม่รู้จะเริ่มยังไง" /></div>
+
+                    <label style={S.label}>Persona ลูกค้าโดยละเอียด</label>
+                    <div style={S.wrap}><input style={S.inp} value={brand.targetPersona || ''} onChange={e => updateField('targetPersona', e.target.value)} placeholder="เช่น ผู้หญิง อายุ 28-38 ปี ทำงานออฟฟิศ รายได้ 30,000+ บาท" /></div>
+
+                    <label style={S.label}>คำที่ห้ามใช้</label>
+                    <div style={S.wrap}><input style={S.inp} value={brand.forbiddenWords || ''} onChange={e => updateField('forbiddenWords', e.target.value)} placeholder="เช่น ถูก, ราคาตลาด, ธรรมดา (คั่นด้วยจุลภาค)" /></div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 0 }}>
+                        <div>
+                            <label style={S.label}>สีแบรนด์หลัก</label>
+                            <div style={{ ...S.wrap, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px' }}>
+                                <input type="color" value={brand.primaryColor || '#5E9BEB'} onChange={e => updateField('primaryColor', e.target.value)}
+                                    style={{ width: 28, height: 28, border: 'none', background: 'none', cursor: 'pointer', padding: 0, borderRadius: 6 }} />
+                                <span style={{ fontSize: '0.78rem', color: '#64748b', fontFamily: 'monospace' }}>{brand.primaryColor || '#5E9BEB'}</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label style={S.label}>Mood & Feel</label>
+                            <div style={S.wrap}><input style={S.inp} value={brand.moodKeywords || ''} onChange={e => updateField('moodKeywords', e.target.value)} placeholder="เช่น อบอุ่น, ทันสมัย" /></div>
+                        </div>
                     </div>
 
                     {localBrands.length > 1 && (
@@ -531,11 +581,28 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
         brandId: String(b.id),
         brandNameTh: b.name || 'แบรนด์ของฉัน',
         brandNameEn: b.nameEn || 'My Brand',
-        industry: b.industry === 'other' ? b.industryOther : (INDUSTRY_OPTIONS.find(o => o.value === b.industry)?.label?.replace(/^.{2}\s*/, '') || b.industry),
-        coreUSP: b.usp.split(',').map(s => s.trim()).filter(Boolean),
-        targetAudience: b.audience,
-        toneOfVoice: b.tone,
+        industry: b.industry === 'other'
+            ? (b.industryOther || 'ธุรกิจอื่นๆ')
+            : (INDUSTRY_OPTIONS.find(o => o.value === b.industry)?.label?.replace(/^.{2}\s*/, '') || b.industry || 'ธุรกิจทั่วไป'),
+        // Bucket 1: Strategy
+        coreUSP: b.usp ? b.usp.split(',').map(s => s.trim()).filter(Boolean) : [],
+        competitors: b.competitors ? b.competitors.split(',').map(s => s.trim()).filter(Boolean) : [],
+        // Bucket 2: Visual/Creative
+        visualStyle: {
+            primaryColor: b.primaryColor || '#5E9BEB',
+            moodKeywords: b.moodKeywords ? b.moodKeywords.split(',').map(s => s.trim()).filter(Boolean) : ['professional'],
+            secondaryColors: [],
+        },
+        // Bucket 3: Growth/Communication
+        targetAudience: b.audience || '',
+        targetPersona: b.targetPersona || '',
+        painPoints: b.painPoints ? b.painPoints.split(',').map(s => s.trim()).filter(Boolean) : [],
+        toneOfVoice: b.tone || 'professional',
+        forbiddenWords: b.forbiddenWords ? b.forbiddenWords.split(',').map(s => s.trim()).filter(Boolean) : [],
+        brandHashtags: [],
+        // Metadata
         isDefault: false,
+        createdAt: new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
     });
 
