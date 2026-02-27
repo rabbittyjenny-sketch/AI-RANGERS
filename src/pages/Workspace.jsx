@@ -235,6 +235,16 @@ PastSessionRow.displayName = 'PastSessionRow';
 const OutputCard = ({ output, index }) => {
     const [copied, setCopied] = useState(false);
     const handleCopy = () => { navigator.clipboard.writeText(output.content || output.text || ''); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+    const handleDownload = () => {
+        const content = output.content || output.text || '';
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(output.title || 'output').replace(/[^a-zA-Zก-๙0-9\s]/g, '_').trim()}.txt`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
     const icons = { image: '🖼️', code: '💻', report: '📊', document: '📄', default: '📝' };
     return (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.06 }}
@@ -242,7 +252,10 @@ const OutputCard = ({ output, index }) => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', borderBottom: '1px solid rgba(209,217,230,0.5)' }}>
                 <span style={{ fontSize: 14 }}>{icons[output.type] || icons.default}</span>
                 <span style={{ flex: 1, fontSize: '0.76rem', fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{output.title || 'ผลลัพธ์'}</span>
-                <button onClick={handleCopy} style={{ background: BG, border: 'none', borderRadius: 7, padding: 4, cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
+                <button onClick={handleDownload} title="ดาวน์โหลด" style={{ background: BG, border: 'none', borderRadius: 7, padding: 4, cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
+                    <Download size={11} />
+                </button>
+                <button onClick={handleCopy} title="คัดลอก" style={{ background: BG, border: 'none', borderRadius: 7, padding: 4, cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
                     {copied ? <Check size={11} color="#10b981" /> : <Copy size={11} />}
                 </button>
             </div>
@@ -495,7 +508,9 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [speechSupported, setSpeechSupported] = useState(false);
     const [attachments, setAttachments] = useState([]);
     const [previewUrls, setPreviewUrls] = useState({});
-    const [outputs, setOutputs] = useState([]);
+    const [outputs, setOutputs] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('ranger_outputs') || '[]'); } catch { return []; }
+    });
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
     const [showComingSoon, setShowComingSoon] = useState(false);
     const [showGuidebook, setShowGuidebook] = useState(false);
@@ -563,6 +578,11 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     useEffect(() => { if (selectedId) sessionStorage.setItem('ranger_selectedAgent', selectedId); }, [selectedId]);
     useEffect(() => { if (outputs.length > 0) setRightPanelOpen(true); }, [outputs.length]);
 
+    /* Persist outputs to localStorage (เก็บล่าสุด 30 รายการ) */
+    useEffect(() => {
+        try { localStorage.setItem('ranger_outputs', JSON.stringify(outputs.slice(-30))); } catch {}
+    }, [outputs]);
+
     /* Sync active brand → masterContext */
     useEffect(() => {
         if (!hasBrand) return;
@@ -570,6 +590,38 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
         onContextUpdate?.(ctx);
         aiService.initialize(ctx);
     }, [activeBrandIdx, brands]);
+
+    /* Load brands from Neon DB on mount (merge กับ localStorage) */
+    useEffect(() => {
+        databaseService.getBrands().then(dbBrands => {
+            if (!dbBrands?.length) return;
+            setBrands(prev => {
+                let merged = [...prev];
+                dbBrands.forEach(db => {
+                    const already = merged.find(b => b.name === db.brandNameTh || String(b.id) === String(db.id));
+                    if (!already && merged.length < 3) {
+                        merged.push({
+                            id: db.id || Date.now(),
+                            name: db.brandNameTh || '',
+                            nameEn: db.brandNameEn || '',
+                            industry: db.industry || '',
+                            industryOther: '',
+                            usp: Array.isArray(db.coreUsp) ? db.coreUsp.join(', ') : (db.coreUsp || ''),
+                            audience: db.targetAudience || '',
+                            tone: db.toneOfVoice || 'professional',
+                            competitors: Array.isArray(db.competitors) ? db.competitors.join(', ') : '',
+                            painPoints: Array.isArray(db.painPoints) ? db.painPoints.join(', ') : '',
+                            targetPersona: db.targetPersona || '',
+                            forbiddenWords: Array.isArray(db.forbiddenWords) ? db.forbiddenWords.join(', ') : '',
+                            primaryColor: db.primaryColor || '#5E9BEB',
+                            moodKeywords: Array.isArray(db.moodKeywords) ? db.moodKeywords.join(', ') : '',
+                        });
+                    }
+                });
+                return merged;
+            });
+        }).catch(() => {});
+    }, []);
 
     /* Persist brands */
     useEffect(() => {
@@ -704,7 +756,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         <BookOpen size={15} />
                     </button>
                     {/* Logout */}
-                    <button title="ออกจากระบบ"
+                    <button title="ออกจากระบบ" onClick={() => { if (window.confirm('ออกจากระบบแล้วจะล้างประวัติแชทในเซสชั่นนี้ ต้องการออกจากระบบไหมคะ?')) { sessionStorage.clear(); window.location.reload(); } }}
                         style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
                         <LogOut size={15} />
                     </button>
@@ -1031,10 +1083,22 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                                         )}
                                         {outputs.length > 0 && (
                                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 6 }}>
-                                                <button style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
+                                                <button onClick={() => {
+                                                    const content = outputs.map((o, i) => `=== ${i + 1}. ${o.title || 'ผลลัพธ์'} (by ${o.agentName || 'Ranger'}) ===\n${o.content || o.text || ''}`).join('\n\n---\n\n');
+                                                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                                                    const url = URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `AI_Rangers_${new Date().toLocaleDateString('th-TH').replace(/\//g, '-')}.txt`;
+                                                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                                                    URL.revokeObjectURL(url);
+                                                }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
                                                     <Download size={12} /> ส่งออก
                                                 </button>
-                                                <button style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
+                                                <button onClick={() => {
+                                                    const content = outputs.map((o, i) => `=== ${i + 1}. ${o.title || 'ผลลัพธ์'} ===\n${o.content || o.text || ''}`).join('\n\n---\n\n');
+                                                    navigator.clipboard.writeText(content);
+                                                }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
                                                     <Copy size={12} /> คัดลอก
                                                 </button>
                                             </div>

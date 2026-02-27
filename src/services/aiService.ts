@@ -88,10 +88,8 @@ class AIService {
     // 4. Build context string (rich — ใช้ข้อมูลจาก Neon ทุก field)
     const contextMsg = this.buildContextMessage(agent, ctx);
 
-    // 5. Build API messages
-    //    - ถ้ามี history จาก UI ส่งมา ใช้เลย (UI จัดการ history เอง)
-    //    - ถ้าไม่มี ใช้ in-memory chatHistories
-    const messages = this.buildMessages(agentId, text, contextMsg, history);
+    // 5. Build API messages (ส่ง attachments ไปด้วยเพื่อ vision support)
+    const messages = this.buildMessages(agentId, text, contextMsg, history, attachments);
 
     // 6. Route → Call Claude API → Validate (Orchestrator fully integrated)
     let responseText: string;
@@ -102,7 +100,7 @@ class AIService {
         console.info(`[Orchestrator] Routing suggests '${routingResult.primaryAgent}' but user selected '${agentId}' — respecting user choice`);
       }
 
-      // 6b. Call Claude API with full brand context in system prompt
+      // 6b. Call Claude API with full brand context + vision content
       responseText = await this.callClaudeAPI(agent, messages, contextMsg);
 
       // 6c. Validate output quality through Orchestrator
@@ -232,20 +230,58 @@ class AIService {
   }
 
   // ── buildMessages ─────────────────────────────────────────────────────────
+  // รองรับ vision: ถ้ามี image attachments จะ embed เป็น content array
   private buildMessages(
     agentId: string,
     userInput: string,
     contextMsg: string,
-    uiHistory: Array<{ role: 'user' | 'assistant'; content: string }>
-  ): Array<{ role: 'user' | 'assistant'; content: string }> {
-    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    uiHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
+    attachments?: Array<{ name: string; type: string; size: number; data?: string }>
+  ): Array<{ role: 'user' | 'assistant'; content: any }> {
+    const messages: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+
+    // Build vision content สำหรับ images ที่แนบมา
+    const imageAttachments = attachments?.filter(a => a.type.startsWith('image/') && a.data) || [];
+    const textAttachments = attachments?.filter(a => !a.type.startsWith('image/') && a.data) || [];
+
+    // สร้าง content array สำหรับ user message ปัจจุบัน
+    const buildUserContent = (text: string, isFirst = false): any => {
+      const base = isFirst ? `${contextMsg}\n\n---\nคำถาม: ${text}` : text;
+
+      // ถ้าไม่มี attachment → ส่งเป็น string ธรรมดา
+      if (imageAttachments.length === 0 && textAttachments.length === 0) {
+        return base;
+      }
+
+      // มี attachments → ส่งเป็น content array (Claude Vision format)
+      const contentArr: any[] = [{ type: 'text', text: base }];
+
+      imageAttachments.forEach(att => {
+        // base64 data URI: "data:image/jpeg;base64,xxxx" → ตัด prefix ออก
+        const base64 = att.data?.split(',')[1] || att.data || '';
+        const mediaType = att.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+        contentArr.push({
+          type: 'image',
+          source: { type: 'base64', media_type: mediaType, data: base64 },
+        });
+      });
+
+      textAttachments.forEach(att => {
+        const rawText = att.data?.split(',').slice(1).join(',') || '';
+        try {
+          const decoded = att.type === 'text/plain' ? atob(rawText) : rawText;
+          contentArr.push({ type: 'text', text: `\n\n[ไฟล์แนบ: ${att.name}]\n${decoded}` });
+        } catch { /* skip if decode fails */ }
+      });
+
+      return contentArr;
+    };
 
     if (uiHistory.length === 0) {
-      // รอบแรก: inject context
-      messages.push({ role: 'user', content: `${contextMsg}\n\n---\nคำถาม: ${userInput}` });
+      // รอบแรก: inject context + attachments
+      messages.push({ role: 'user', content: buildUserContent(userInput, true) });
     } else {
-      // รอบต่อไป: ส่ง history + user ใหม่
-      // ensure alternating roles + ให้รอบแรกของ history คง context ไว้
+      // รอบต่อไป: ส่ง history + user message ใหม่
       let valid = [...uiHistory];
       if (valid[0]?.role !== 'user') valid = valid.slice(1);
       const trimmed: typeof valid = [];
@@ -253,10 +289,9 @@ class AIService {
         const last = trimmed[trimmed.length - 1];
         if (!last || last.role !== m.role) trimmed.push(m);
       }
-      // เก็บ last 10 turns แต่ถ้า turn แรกไม่มี context แล้ว inject ใหม่
       const sliced = trimmed.slice(-10);
       messages.push(...sliced);
-      messages.push({ role: 'user', content: userInput });
+      messages.push({ role: 'user', content: buildUserContent(userInput) });
     }
 
     return messages;
