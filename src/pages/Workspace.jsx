@@ -80,7 +80,10 @@ const renderInline = (text) => {
 };
 const MarkdownText = ({ text }) => {
     if (!text) return null;
-    const lines = text.split('\n'); const els = []; let k = 0;
+    // Strip [WORKFILE:...]...[/WORKFILE] blocks from chat display — they go to Panel 3 only
+    const hasWorkfile = /\[WORKFILE:[\s\S]*?\[\/WORKFILE\]/i.test(text);
+    const cleaned = text.replace(/\[WORKFILE:[^\]]*\][\s\S]*?\[\/WORKFILE\]/g, '').trim();
+    const lines = cleaned.split('\n'); const els = []; let k = 0;
     for (const line of lines) {
         if (line.startsWith('### ')) els.push(<div key={k++} style={{ fontWeight: 700, color: '#1e293b', margin: '12px 0 4px', fontSize: '0.85rem' }}>{renderInline(line.slice(4))}</div>);
         else if (line.startsWith('## ')) els.push(<div key={k++} style={{ fontWeight: 700, color: '#1e293b', margin: '12px 0 4px', fontSize: '0.9rem' }}>{renderInline(line.slice(3))}</div>);
@@ -90,7 +93,16 @@ const MarkdownText = ({ text }) => {
         else if (line.trim() === '') els.push(<div key={k++} style={{ height: 4 }} />);
         else els.push(<div key={k++} style={{ margin: '2px 0', lineHeight: 1.65 }}>{renderInline(line)}</div>);
     }
-    return <div style={{ fontSize: '0.85rem', color: '#475569' }}>{els}</div>;
+    return (
+        <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+            {els}
+            {hasWorkfile && (
+                <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 5, background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '3px 10px', fontSize: '0.72rem', color: '#3b82f6', fontWeight: 600 }}>
+                    📁 บันทึกลงไฟล์งานแล้ว
+                </div>
+            )}
+        </div>
+    );
 };
 
 /* ═══════════════════════════════════════════════════
