@@ -293,3 +293,186 @@ code,
 .cluster-growth {
   --c: #059669;
 }
+/* ═══════════════════════════════════════════════════
+   RESPONSIVE — Mobile & Tablet
+═══════════════════════════════════════════════════ */
+
+/* ── Mobile Bottom Tab Bar ────────────────────────── */
+.mobile-tab-bar {
+  display: none;
+}
+
+/* ── Tablet: narrow left panel ───────────────────── */
+@media (max-width: 1024px) {
+  .panel-left {
+    width: 88px !important;
+    min-width: 88px !important;
+  }
+  .panel-left .rangers-label,
+  .panel-left .past-sessions-section,
+  .panel-left .clear-all-btn {
+    display: none !important;
+  }
+  .panel-left .rangers-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 12px 8px !important;
+  }
+  .panel-right {
+    width: 260px !important;
+    min-width: 260px !important;
+  }
+}
+
+/* ── Mobile (<768px): full overhaul ─────────────── */
+@media (max-width: 768px) {
+  /* Hide left panel entirely */
+  .panel-left {
+    display: none !important;
+  }
+
+  /* Hide right panel by default — toggle only */
+  .panel-right-mobile-hidden {
+    display: none !important;
+  }
+
+  /* Chat panel takes full width */
+  .panel-center {
+    width: 100% !important;
+    flex: 1 !important;
+  }
+
+  /* Input bar padding bottom = 72px to avoid bottom tab overlap */
+  .input-bar-wrapper {
+    padding-bottom: env(safe-area-inset-bottom, 80px) !important;
+  }
+
+  /* Show mobile bottom tab bar */
+  .mobile-tab-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: #EFF2F9;
+    border-top: 1px solid rgba(209,217,230,0.7);
+    padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 6px);
+    gap: 4px;
+    box-shadow: 0 -4px 16px rgba(209,217,230,0.5);
+    justify-content: space-around;
+  }
+
+  .mobile-tab-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    max-width: 72px;
+    padding: 6px 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 14px;
+    transition: all 0.2s;
+    position: relative;
+    gap: 3px;
+  }
+
+  .mobile-tab-btn.active {
+    background: rgba(94,155,235,0.1);
+  }
+
+  .mobile-tab-ranger-img {
+    width: 34px;
+    height: 34px;
+    object-fit: contain;
+    border-radius: 10px;
+  }
+
+  .mobile-tab-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: #94a3b8;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 64px;
+    text-align: center;
+  }
+
+  .mobile-tab-btn.active .mobile-tab-label {
+    color: #5E9BEB;
+  }
+
+  .mobile-tab-badge {
+    position: absolute;
+    top: 2px;
+    right: 6px;
+    min-width: 14px;
+    height: 14px;
+    border-radius: 99px;
+    background: #5E9BEB;
+    color: #fff;
+    font-size: 8px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+  }
+
+  /* Topbar adjustments */
+  .topbar-guidebook-btn,
+  .topbar-status-badge {
+    display: none !important;
+  }
+
+  /* Messages area extra bottom padding */
+  .chat-messages-area {
+    padding-bottom: 80px !important;
+  }
+
+  /* Input bar bottom padding for tab bar */
+  .input-bar-outer {
+    padding-bottom: 72px !important;
+  }
+
+  /* Panel right: slide up as modal on mobile */
+  .panel-right-modal {
+    position: fixed !important;
+    bottom: 64px !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    max-height: 70vh !important;
+    border-radius: 24px 24px 0 0 !important;
+    z-index: 45 !important;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.12) !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(209,217,230,0.6) !important;
+  }
+
+  /* Chat message content narrower padding on mobile */
+  .chat-messages-inner {
+    padding: 16px 14px 10px !important;
+  }
+}
+
+/* ── Small phones (<380px) ───────────────────────── */
+@media (max-width: 380px) {
+  .mobile-tab-btn {
+    max-width: 56px;
+    padding: 5px 2px;
+  }
+  .mobile-tab-ranger-img {
+    width: 28px;
+    height: 28px;
+  }
+  .mobile-tab-label {
+    font-size: 8px;
+  }
+}
