@@ -1,24 +1,29 @@
 /**
  * AI Service — Agent Ranger 2 Phase 1
- * 
+ *
  * Public API:
  *   aiService.sendMessage(rangerId, text, history, ctx, attachments) → { text, confidence, outputs }
  *   aiService.initialize(context)
  *   aiService.clearHistory()
  *   aiService.clearAgentHistory(agentId)
- * 
+ *
  * Ranger ID → Agent ID mapping (UI ใหม่ ↔ backend agents.ts):
  *   'brand'    → 'brand-builder'
  *   'content'  → 'content-creator'
  *   'planning' → 'campaign-planner'
  *   'marketing'→ 'market-insight'
  *   'consult'  → 'advisor'
+ *
+ * Pipeline (6c updated — dual-gate validation):
+ *   Gate 1: orchestratorEngine.validate()  → format / empty check  (sync, fast)
+ *   Gate 2: dataGuardian.validateContent() → brand / USP / tone    (async, non-blocking to UX)
  */
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { orchestratorEngine } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
+import { dataGuardian } from './dataGuardService'; // ← NEW
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
 const RANGER_TO_AGENT: Record<string, string> = {
@@ -38,6 +43,22 @@ const RANGER_TO_AGENT: Record<string, string> = {
 export interface SendMessageResponse {
   text: string;
   confidence: number;
+  outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
+}
+
+export interface ProcessMessageRequest {
+  userInput: string;
+  context?: MasterContext;
+  forceAgent?: string;
+  attachments?: Array<{ name: string; type: string; size: number; data?: string }>;
+}
+
+export interface ProcessMessageResponse {
+  content: string;
+  agentId: string;
+  agentName: string;
+  confidence: number;
+  factCheckResult: { valid: boolean; violations: string[]; warnings: string[] };
   outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
 }
 
@@ -91,7 +112,7 @@ class AIService {
     // 5. Build API messages (ส่ง attachments ไปด้วยเพื่อ vision support)
     const messages = this.buildMessages(agentId, text, contextMsg, history, attachments);
 
-    // 6. Route → Call Claude API → Validate (Orchestrator fully integrated)
+    // 6. Route → Call Claude API → Validate (Dual-Gate Pipeline)
     let responseText: string;
     try {
       // 6a. Log Orchestrator routing decision (ไม่ override user selection)
@@ -103,20 +124,46 @@ class AIService {
       // 6b. Call Claude API with full brand context + vision content
       responseText = await this.callClaudeAPI(agent, messages, contextMsg);
 
-      // 6c. Validate output quality through Orchestrator
+      // ── GATE 1: Format / Quality Check (orchestrator — sync, fast) ──────
       const validation = orchestratorEngine.validate(agentId, responseText);
       if (!validation.passed) {
         const criticals = validation.issues.filter(i => i.severity === 'critical');
         if (criticals.length > 0) {
-          console.warn(`[Orchestrator] Critical validation failed for '${agentId}':`, criticals.map(i => i.message));
-          // ถ้า output ว่างเปล่าหรือไม่มีเนื้อหา → ใช้ fallback
+          console.warn(`[Gate1] Critical validation failed for '${agentId}':`, criticals.map(i => i.message));
           if (criticals.some(i => i.message.includes('ว่างเปล่า'))) {
             responseText = this.buildFallbackResponse(agentId, text, ctx);
           }
         } else {
-          console.info(`[Orchestrator] Validation warnings for '${agentId}':`, validation.issues.map(i => i.message));
+          console.info(`[Gate1] Validation warnings for '${agentId}':`, validation.issues.map(i => i.message));
         }
       }
+
+      // ── GATE 2: Brand / USP / Tone Check (dataGuardian — async) ─────────
+      // Non-blocking: ไม่หยุดรอ user แต่ถ้า blocked จะแนบ note ท้าย response
+      try {
+        const guardCtx = {
+          brandId:      String(ctx.brandId || 'guest'),
+          brandNameTh:  ctx.brandNameTh,
+          coreUSP:      Array.isArray(ctx.coreUSP) ? ctx.coreUSP.join(', ') : (ctx.coreUSP || ''),
+          toneOfVoice:  ctx.toneOfVoice,
+          visualStyle:  ctx.visualStyle,
+          forbiddenWords: (ctx as any).forbiddenWords,
+        };
+
+        const guardReport = await dataGuardian.validateContent(guardCtx, responseText);
+        console.info(`[Gate2] DataGuard status: ${guardReport.overallStatus}`);
+
+        if (guardReport.overallStatus === 'blocked') {
+          // Critical brand violation — แจ้ง user ชัดเจน
+          const reasons = guardReport.recommendations.slice(0, 2).join(' · ') || 'ตรวจพบเนื้อหาที่ไม่สอดคล้องกับแบรนด์';
+          responseText += `\n\n---\n⚠️ **Data Guard แจ้งเตือน:** ${reasons}\n_กรุณาตรวจสอบหรือลองถามใหม่อีกครั้งค่ะ_`;
+        }
+        // warning → silent (log เท่านั้น ไม่รบกวน user)
+      } catch (guardErr) {
+        // Guard error ต้องไม่กระทบ user experience
+        console.warn('[Gate2] DataGuard error (non-fatal):', guardErr);
+      }
+
     } catch (err: any) {
       // Graceful fallback
       console.error('[AIService] API error:', err.message);
@@ -161,76 +208,30 @@ class AIService {
 
     let msg = `## ข้อมูลธุรกิจของผู้ใช้`;
     msg += `\n- ชื่อแบรนด์: ${ctx.brandNameTh}${ctx.brandNameEn ? ` (${ctx.brandNameEn})` : ''}`;
-    msg += `\n- ประเภทธุรกิจ: ${ctx.industry || 'ไม่ระบุ'}`;
-    msg += `\n- รูปแบบธุรกิจ: ${ctx.businessModel || 'ไม่ระบุ'}`;
-    msg += `\n- จุดเด่น (USP): ${usps.filter(Boolean).join(' | ') || 'ยังไม่ระบุ'}`;
-    msg += `\n- กลุ่มลูกค้าหลัก: ${ctx.targetAudience || 'ยังไม่ระบุ'}`;
-
-    if (ctx.targetPersona) {
-      msg += `\n- Persona ลูกค้า: ${ctx.targetPersona}`;
-    }
-
-    if (ctx.painPoints?.length) {
-      msg += `\n- ปัญหาที่ลูกค้าเจอ: ${ctx.painPoints.join(', ')}`;
-    }
-
-    msg += `\n- โทนเสียงแบรนด์: ${ctx.toneOfVoice || 'professional'}`;
-
-    if (ctx.visualStyle?.primaryColor) {
-      msg += `\n- สีแบรนด์หลัก: ${ctx.visualStyle.primaryColor}`;
-    }
-    if (ctx.visualStyle?.secondaryColors?.length) {
-      msg += `\n- สีรอง: ${ctx.visualStyle.secondaryColors.join(', ')}`;
-    }
-    if (ctx.visualStyle?.fontFamily?.length) {
-      msg += `\n- ฟอนต์: ${ctx.visualStyle.fontFamily.join(', ')}`;
-    }
-    if (ctx.visualStyle?.moodKeywords?.length) {
-      msg += `\n- Mood & Feel: ${ctx.visualStyle.moodKeywords.join(', ')}`;
-    }
-    if (ctx.visualStyle?.videoStyle) {
-      msg += `\n- สไตล์วิดีโอ: ${ctx.visualStyle.videoStyle}`;
-    }
-    if (ctx.visualStyle?.forbiddenElements?.length) {
-      msg += `\n- ห้ามใช้ visual: ${ctx.visualStyle.forbiddenElements.join(', ')}`;
-    }
-
-    if (ctx.competitors?.length) {
-      msg += `\n- คู่แข่งที่รู้จัก: ${ctx.competitors.join(', ')}`;
-    }
-
-    if (ctx.forbiddenWords?.length) {
-      msg += `\n- คำที่ห้ามใช้: ${ctx.forbiddenWords.join(', ')}`;
-    }
-
-    if (ctx.brandHashtags?.length) {
-      msg += `\n- แฮชแท็กประจำแบรนด์: ${ctx.brandHashtags.join(' ')}`;
-    }
-
-    if (ctx.multilingualLevel) {
-      msg += `\n- ระดับภาษา: ${ctx.multilingualLevel}`;
-    }
-
-    if (ctx.logoUrl) {
-      msg += `\n- Logo URL: ${ctx.logoUrl}`;
-    }
+    msg += `\n- อุตสาหกรรม: ${ctx.industry || 'ไม่ระบุ'}`;
+    msg += `\n- จุดเด่น (USP): ${usps.filter(Boolean).join(', ') || 'ไม่ระบุ'}`;
+    msg += `\n- กลุ่มลูกค้า: ${ctx.targetAudience || 'ไม่ระบุ'}`;
+    if (ctx.toneOfVoice) msg += `\n- โทนเสียง: ${ctx.toneOfVoice}`;
+    if ((ctx as any).forbiddenWords?.length) msg += `\n- คำต้องห้าม: ${(ctx as any).forbiddenWords.join(', ')}`;
+    if (ctx.competitors?.length) msg += `\n- คู่แข่ง: ${ctx.competitors.join(', ')}`;
+    if ((ctx as any).painPoints?.length) msg += `\n- Pain Points ลูกค้า: ${(ctx as any).painPoints.join(', ')}`;
+    if ((ctx as any).targetPersona) msg += `\n- Persona: ${(ctx as any).targetPersona}`;
 
     if (!hasRealData) {
-      msg += `\n\n⚠️ ผู้ใช้ยังไม่ได้กรอกข้อมูลแบรนด์ครบ — ถ้าต้องใช้ข้อมูลเฉพาะ ให้ถามก่อน 1-2 คำถามสั้นๆ`;
+      msg += `\n\n⚠️ ยังไม่มีข้อมูลแบรนด์ที่สมบูรณ์ — ให้ถามผู้ใช้เพิ่มเติม`;
     }
 
-    msg += `\n\n## กฎการตอบ
-1. ตอบภาษาไทยเสมอ ใช้คำ English เฉพาะที่คนทั่วไปรู้จัก
-2. ใช้ข้อมูลแบรนด์ด้านบนทุกครั้ง อย่าสมมติข้อมูลเอง
-3. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี
-4. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ
-5. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
+    msg += `\n\n## คำสั่งสำหรับ ${agent.name}`;
+    msg += `\n1. ตอบเป็นภาษาไทยเป็นหลัก`;
+    msg += `\n2. ใช้ข้อมูลแบรนด์ด้านบนทุกครั้ง อย่าสมมติข้อมูลเอง`;
+    msg += `\n3. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
+    msg += `\n4. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
+    msg += `\n5. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
 
     return msg;
   }
 
   // ── buildMessages ─────────────────────────────────────────────────────────
-  // รองรับ vision: ถ้ามี image attachments จะ embed เป็น content array
   private buildMessages(
     agentId: string,
     userInput: string,
@@ -240,24 +241,19 @@ class AIService {
   ): Array<{ role: 'user' | 'assistant'; content: any }> {
     const messages: Array<{ role: 'user' | 'assistant'; content: any }> = [];
 
-    // Build vision content สำหรับ images ที่แนบมา
     const imageAttachments = attachments?.filter(a => a.type.startsWith('image/') && a.data) || [];
     const textAttachments = attachments?.filter(a => !a.type.startsWith('image/') && a.data) || [];
 
-    // สร้าง content array สำหรับ user message ปัจจุบัน
     const buildUserContent = (text: string, isFirst = false): any => {
       const base = isFirst ? `${contextMsg}\n\n---\nคำถาม: ${text}` : text;
 
-      // ถ้าไม่มี attachment → ส่งเป็น string ธรรมดา
       if (imageAttachments.length === 0 && textAttachments.length === 0) {
         return base;
       }
 
-      // มี attachments → ส่งเป็น content array (Claude Vision format)
       const contentArr: any[] = [{ type: 'text', text: base }];
 
       imageAttachments.forEach(att => {
-        // base64 data URI: "data:image/jpeg;base64,xxxx" → ตัด prefix ออก
         const base64 = att.data?.split(',')[1] || att.data || '';
         const mediaType = att.type as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
         contentArr.push({
@@ -278,10 +274,8 @@ class AIService {
     };
 
     if (uiHistory.length === 0) {
-      // รอบแรก: inject context + attachments
       messages.push({ role: 'user', content: buildUserContent(userInput, true) });
     } else {
-      // รอบต่อไป: ส่ง history + user message ใหม่
       let valid = [...uiHistory];
       if (valid[0]?.role !== 'user') valid = valid.slice(1);
       const trimmed: typeof valid = [];
@@ -330,8 +324,6 @@ class AIService {
         body: JSON.stringify({
           model,
           max_tokens: 4096,
-          // ✅ รวม brand context เข้ากับ system prompt เสมอ
-          // ทำให้ Agent รู้ข้อมูลแบรนด์ทุก turn ไม่ใช่แค่รอบแรก
           system: contextMsg
             ? `${agent.systemPrompt}\n\n---\n${contextMsg}`
             : agent.systemPrompt,
@@ -370,7 +362,6 @@ class AIService {
   }
 
   // ── extractOutputs ────────────────────────────────────────────────────────
-  // จับเฉพาะเนื้อหาที่ agent ครอบด้วย [WORKFILE: ชื่อ]...[/WORKFILE] เท่านั้น
   private extractOutputs(text: string, agentName: string) {
     const outputs: Array<{ id: string; type: string; title: string; content: string; agentName: string }> = [];
     const tagRegex = /\[WORKFILE:\s*(.+?)\]\s*([\s\S]*?)\s*\[\/WORKFILE\]/g;
@@ -395,14 +386,43 @@ class AIService {
     const audience = ctx.targetAudience || 'กลุ่มเป้าหมาย';
 
     const templates: Record<string, string> = {
-      'brand-builder': `🏷️ **สร้างแบรนด์สำหรับ ${brand}**\n\nจากที่บอกมา ขอถามเพิ่มนิดนึงนะคะ:\n1. ${brand} มีจุดเด่นที่ต่างจากคู่แข่งยังไงคะ?\n2. ลูกค้าหลักเป็นใครคะ? อายุเท่าไหร่? อยู่ไหน?\n\n⚠️ ขณะนี้ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'content-creator': `✍️ **ไอเดียคอนเทนต์สำหรับ ${brand}**\n\n**Hook ที่ใช้ได้:**\n"[ปัญหาที่ ${audience} เจอ] — ${brand} มีคำตอบ"\n\n**จุดเด่นที่โพสต์ได้:** ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
+      'brand-builder':    `🏷️ **สร้างแบรนด์สำหรับ ${brand}**\n\nจากที่บอกมา ขอถามเพิ่มนิดนึงนะคะ:\n1. ${brand} มีจุดเด่นที่ต่างจากคู่แข่งยังไงคะ?\n2. ลูกค้าหลักเป็นใครคะ? อายุเท่าไหร่? อยู่ไหน?\n\n⚠️ ขณะนี้ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
+      'content-creator':  `✍️ **ไอเดียคอนเทนต์สำหรับ ${brand}**\n\n**Hook ที่ใช้ได้:**\n"[ปัญหาที่ ${audience} เจอ] — ${brand} มีคำตอบ"\n\n**จุดเด่นที่โพสต์ได้:** ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
       'campaign-planner': `📅 **โครงร่างแคมเปญ ${brand}**\n\n- สัปดาห์ 1: แนะนำตัว ให้คนรู้จัก\n- สัปดาห์ 2: แสดงจุดเด่น "${usps}"\n- สัปดาห์ 3: ปิดการขาย / CTA\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'market-insight': `🔭 **ภาพรวมตลาด ${industry}**\n\n- วิเคราะห์คู่แข่ง: ${ctx.competitors?.join(', ') || 'ยังไม่มีข้อมูล'}\n- โอกาส: ช่องว่างที่คู่แข่งยังไม่ได้ทำ\n- จุดแข็ง ${brand}: ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'advisor': `💬 ได้รับคำถามแล้วค่ะ: "${input}"\n\nฉันพร้อมช่วยทันทีที่ระบบกลับมาออนไลน์นะคะ\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
+      'market-insight':   `🔭 **ภาพรวมตลาด ${industry}**\n\n- วิเคราะห์คู่แข่ง: ${ctx.competitors?.join(', ') || 'ยังไม่มีข้อมูล'}\n- โอกาส: ช่องว่างที่คู่แข่งยังไม่ได้ทำ\n- จุดแข็ง ${brand}: ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
+      'advisor':          `💬 ได้รับคำถามแล้วค่ะ: "${input}"\n\nฉันพร้อมช่วยทันทีที่ระบบกลับมาออนไลน์นะคะ\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
     };
 
     return templates[agentId] || `💬 ได้รับคำถาม: "${input}"\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`;
+  }
+
+  // ── processMessage (PUBLIC API used by AgentChat + AgentsGrid) ───────────
+  // Wrapper รอบ sendMessage — รับ object input, return object ที่ UI ทั้งสองใช้
+  async processMessage(req: ProcessMessageRequest): Promise<ProcessMessageResponse> {
+    const { userInput, context, forceAgent, attachments } = req;
+
+    if (context) this.initialize(context);
+    const ctx = this.masterContext || this.buildDefaultContext();
+
+    const agentId = forceAgent
+      ? (RANGER_TO_AGENT[forceAgent] || forceAgent)
+      : 'advisor';
+    const agent = getAgentById(agentId);
+    if (!agent) throw new Error(`ไม่พบ Agent: ${agentId}`);
+
+    // ใช้ history จาก chatHistories ที่เก็บไว้ใน memory
+    const history = this.chatHistories.get(agentId) || [];
+
+    const result = await this.sendMessage(agentId, userInput, history, ctx, attachments);
+
+    return {
+      content: result.text,
+      agentId,
+      agentName: agent.name,
+      confidence: result.confidence,
+      factCheckResult: { valid: true, violations: [], warnings: [] },
+      outputs: result.outputs,
+    };
   }
 
   // ── Public helpers ────────────────────────────────────────────────────────
@@ -411,7 +431,6 @@ class AIService {
   }
 
   clearAgentHistory(agentId: string): void {
-    // รองรับทั้ง ranger ID และ agent ID
     const resolvedId = RANGER_TO_AGENT[agentId] || agentId;
     this.chatHistories.delete(resolvedId);
   }
