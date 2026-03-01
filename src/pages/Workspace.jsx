@@ -530,6 +530,16 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     /* Panel 3 sections */
     const [p3Tab, setP3Tab] = useState('files'); // 'files' | 'brand'
 
+    /* ─── Mobile detection ─── */
+    const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+    const [mobileRightOpen, setMobileRightOpen] = useState(false);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
     /* Brand management: up to 3 brands */
     const [brands, setBrands] = useState(() => {
         try {
@@ -751,7 +761,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                     <span style={{ fontSize: '0.65rem', fontWeight: 500, color: '#94a3b8', letterSpacing: '0.08em', marginRight: 'auto' }}>AGENT RANGERS</span>
 
                     {/* Online status */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99, background: BG, ...NEU.raisedXs }}>
+                    <div className="topbar-status-badge" style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: 99, background: BG, ...NEU.raisedXs }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', animation: 'rangerpulse 2s infinite', display: 'inline-block' }} />
                         <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#10b981' }}>ออนไลน์</span>
                     </div>
@@ -763,7 +773,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         <span style={{ fontSize: '0.76rem', fontWeight: 600, color: '#475569' }}>{currentUser?.name || activeBrand?.name || 'ผู้ใช้'}</span>
                     </div>
                     {/* Guidebook */}
-                    <button onClick={() => setShowGuidebook(true)} title="คู่มือ"
+                    <button className="topbar-guidebook-btn" onClick={() => setShowGuidebook(true)} title="คู่มือ"
                         style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#64748b', ...NEU.raisedXs }}>
                         <BookOpen size={15} />
                     </button>
@@ -778,12 +788,12 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                 <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
                     {/* ── PANEL 1: LEFT ─────────────────────────────────────────── */}
-                    <div style={{ width: 330, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.7)', background: BG, overflow: 'hidden' }}>
+                    <div className="panel-left" style={{ width: 330, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.7)', background: BG, overflow: 'hidden' }}>
 
                         {/* Rangers 3x2 (3 cols 2 rows) grid */}
                         <div style={{ padding: '24px 20px', flexShrink: 0 }}>
-                            <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 20, paddingLeft: 4 }}>RANGERS</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+                            <div className="rangers-label" style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 20, paddingLeft: 4 }}>RANGERS</div>
+                            <div className="rangers-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
                                 {RANGERS.map(ranger => (
                                     <RangerCard key={ranger.id} ranger={ranger}
                                         isActive={ranger.id === selectedId}
@@ -797,7 +807,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         <div style={{ height: 1, background: 'rgba(209,217,230,0.5)', margin: '0 10px', flexShrink: 0 }} />
 
                         {/* Chat History */}
-                        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '10px 8px 6px', minHeight: 0 }}>
+                        <div className="past-sessions-section" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '10px 8px 6px', minHeight: 0 }}>
                             <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7, paddingLeft: 2 }}>บทสนทนาล่าสุด</div>
                             {activeSessions.length > 0 ? (
                                 <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
@@ -817,7 +827,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
 
                         {/* Clear all */}
                         {activeSessions.length > 0 && (
-                            <div style={{ flexShrink: 0, padding: '4px 8px 10px' }}>
+                            <div className="clear-all-btn" style={{ flexShrink: 0, padding: '4px 8px 10px' }}>
                                 <button onClick={() => { if (!window.confirm('ล้างแชทของทุก Ranger?')) return; const c = {}; Object.entries(chatSessions).forEach(([id, msgs]) => { c[id] = msgs.slice(0, 1); }); setChatSessions(c); sessionStorage.removeItem('ranger_chats'); aiService.clearHistory?.(); }}
                                     style={{ width: '100%', padding: '6px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, color: '#94a3b8', fontSize: '0.7rem', fontWeight: 500, ...NEU.raisedXs }}>
                                     <Trash2 size={11} /> ล้างแชททั้งหมด
@@ -827,7 +837,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                     </div>
 
                     {/* ── PANEL 2: CENTER (CHAT) ─────────────────────────────────── */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+                    <div className="panel-center" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
                         {/* Chat Header */}
                         <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 11, padding: '9px 14px', borderBottom: '1px solid rgba(209,217,230,0.5)', background: BG }}>
@@ -877,13 +887,11 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         )}
 
                         {/* Messages */}
-                        <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-                            <div style={{ width: '100%', maxWidth: 900, margin: '0 auto', padding: '24px 38px 10px' }}>
+                        <div className="chat-messages-area" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+                            <div className="chat-messages-inner" style={{ width: '100%', maxWidth: 900, margin: '0 auto', padding: '24px 38px 10px' }}>
                                 {!selectedRanger ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '50px 20px', textAlign: 'center' }}>
-                                        <div style={{ width: 60, height: 60, borderRadius: 22, background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14, ...NEU.raised }}>
-                                            <Sparkles size={26} color="#5E9BEB" />
-                                        </div>
+                                        
                                         <p style={{ fontWeight: 700, fontSize: '0.95rem', color: '#475569', marginBottom: 8 }}>เลือก Ranger เพื่อเริ่มต้น</p>
                                         <p style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 260, lineHeight: 1.75 }}>คลิก Ranger ในรายการด้านซ้ายเพื่อเริ่มบทสนทนา</p>
                                     </div>
@@ -950,7 +958,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         </div>
 
                         {/* ── Input Bar ── */}
-                        <div style={{ flexShrink: 0, padding: '16px 20px 24px', background: BG, borderTop: '1px solid rgba(255,255,255,0.8)' }}>
+                        <div className="input-bar-outer" style={{ flexShrink: 0, padding: '16px 20px 24px', background: BG, borderTop: '1px solid rgba(255,255,255,0.8)' }}>
                             {/* Attachment previews */}
                             {attachments.length > 0 && (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 7 }}>
@@ -1037,9 +1045,12 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
 
                     {/* ── PANEL 3: RIGHT (File Work + Brand) ─────────────────────── */}
                     <AnimatePresence>
-                        {rightPanelOpen && (
+                        {(isMobile ? mobileRightOpen : rightPanelOpen) && (
                             <motion.aside
-                                initial={{ width: 0, opacity: 0 }} animate={{ width: 308, opacity: 1 }} exit={{ width: 0, opacity: 0 }}
+                                className={`panel-right${isMobile ? ' panel-right-modal' : ''}`}
+                                initial={isMobile ? { y: '100%', opacity: 0 } : { width: 0, opacity: 0 }}
+                                animate={isMobile ? { y: 0, opacity: 1 } : { width: 308, opacity: 1 }}
+                                exit={isMobile ? { y: '100%', opacity: 0 } : { width: 0, opacity: 0 }}
                                 transition={{ type: 'spring', stiffness: 280, damping: 28 }}
                                 style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid rgba(209,217,230,0.6)', background: BG, overflow: 'hidden' }}>
 
@@ -1178,9 +1189,65 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         onClose={() => setShowBrandModal(false)} />
                 )}
             </AnimatePresence>
+
+            {/* ── Mobile Bottom Tab Bar (Rangers) ── */}
+            {isMobile && (
+                <nav className="mobile-tab-bar">
+                    {/* Rangers tabs */}
+                    {RANGERS.filter(r => !r.comingSoon).map(ranger => {
+                        const msgCount = chatSessions[ranger.id]?.length || 0;
+                        const isActive = ranger.id === selectedId;
+                        return (
+                            <button
+                                key={ranger.id}
+                                className={`mobile-tab-btn${isActive ? ' active' : ''}`}
+                                onClick={() => handleSelectRanger(ranger)}
+                            >
+                                {!isActive && msgCount > 1 && (
+                                    <span className="mobile-tab-badge">{msgCount > 9 ? '9+' : msgCount}</span>
+                                )}
+                                <img
+                                    src={ranger.img}
+                                    alt={ranger.name}
+                                    className="mobile-tab-ranger-img"
+                                    onError={e => { e.target.style.display = 'none'; }}
+                                />
+                                <span className="mobile-tab-label">{ranger.name}</span>
+                            </button>
+                        );
+                    })}
+                    {/* Files/Brand toggle */}
+                    <button
+                        className={`mobile-tab-btn${mobileRightOpen ? ' active' : ''}`}
+                        onClick={() => setMobileRightOpen(v => !v)}
+                        style={{ position: 'relative' }}
+                    >
+                        {outputs.length > 0 && !mobileRightOpen && (
+                            <span className="mobile-tab-badge">{outputs.length > 9 ? '9+' : outputs.length}</span>
+                        )}
+                        <div style={{ width: 34, height: 34, borderRadius: 10, background: mobileRightOpen ? '#5E9BEB14' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <FileText size={16} color={mobileRightOpen ? '#5E9BEB' : '#94a3b8'} />
+                        </div>
+                        <span className="mobile-tab-label" style={{ color: mobileRightOpen ? '#5E9BEB' : '#94a3b8' }}>ไฟล์/แบรนด์</span>
+                    </button>
+                    {/* Coming Soon */}
+                    <button
+                        className="mobile-tab-btn"
+                        onClick={() => setShowComingSoon(true)}
+                        style={{ opacity: 0.5 }}
+                    >
+                        <img
+                            src={RANGERS.find(r => r.comingSoon)?.img}
+                            alt="Coming Soon"
+                            className="mobile-tab-ranger-img"
+                            onError={e => { e.target.style.display = 'none'; }}
+                        />
+                        <span className="mobile-tab-label">งง?</span>
+                    </button>
+                </nav>
+            )}
         </>
     );
 };
 
 export default Workspace;
-
