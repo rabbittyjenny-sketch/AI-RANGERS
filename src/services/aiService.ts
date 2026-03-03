@@ -14,16 +14,17 @@
  *   'marketing'→ 'market-insight'
  *   'consult'  → 'advisor'
  *
- * Pipeline (6c updated — dual-gate validation):
- *   Gate 1: orchestratorEngine.validate()  → format / empty check  (sync, fast)
- *   Gate 2: dataGuardian.validateContent() → brand / USP / tone    (async, non-blocking to UX)
+ * Pipeline:
+ *   Gate 1: orchestratorEngine.validate()   → format / empty check (sync, fast)
+ *   Gate 2: dataGuardian.validateContent()  → 6-Layer brand check (async, silent — log only)
  */
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { orchestratorEngine } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
-import { dataGuardian } from './dataGuardService'; // ← NEW
+import { dataGuardian } from './dataGuardService';
+
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
 const RANGER_TO_AGENT: Record<string, string> = {
@@ -138,31 +139,16 @@ class AIService {
         }
       }
 
-      // ── GATE 2: Brand / USP / Tone Check (dataGuardian — async) ─────────
-      // Non-blocking: ไม่หยุดรอ user แต่ถ้า blocked จะแนบ note ท้าย response
-      try {
-        const guardCtx = {
-          brandId:      String(ctx.brandId || 'guest'),
-          brandNameTh:  ctx.brandNameTh,
-          coreUSP:      Array.isArray(ctx.coreUSP) ? ctx.coreUSP.join(', ') : (ctx.coreUSP || ''),
-          toneOfVoice:  ctx.toneOfVoice,
-          visualStyle:  ctx.visualStyle,
-          forbiddenWords: (ctx as any).forbiddenWords,
-        };
+      // ── GATE 2: 6-Layer Data Guard (silent — ไม่รบกวน user ไม่ block) ────
+      dataGuardian.validateContent({
+        brandId:     String(ctx.brandId || 'guest'),
+        brandNameTh: ctx.brandNameTh,
+        coreUSP:     Array.isArray(ctx.coreUSP) ? ctx.coreUSP.join(', ') : (ctx.coreUSP || ''),
+        toneOfVoice: ctx.toneOfVoice,
+      }, responseText).then(report => {
+        console.info(`[Gate2/DataGuard] status=${report.overallStatus}`, report.recommendations);
+      }).catch(() => { /* guard error ต้องไม่กระทบ user */ });
 
-        const guardReport = await dataGuardian.validateContent(guardCtx, responseText);
-        console.info(`[Gate2] DataGuard status: ${guardReport.overallStatus}`);
-
-        if (guardReport.overallStatus === 'blocked') {
-          // Critical brand violation — แจ้ง user ชัดเจน
-          const reasons = guardReport.recommendations.slice(0, 2).join(' · ') || 'ตรวจพบเนื้อหาที่ไม่สอดคล้องกับแบรนด์';
-          responseText += `\n\n---\n⚠️ **Data Guard แจ้งเตือน:** ${reasons}\n_กรุณาตรวจสอบหรือลองถามใหม่อีกครั้งค่ะ_`;
-        }
-        // warning → silent (log เท่านั้น ไม่รบกวน user)
-      } catch (guardErr) {
-        // Guard error ต้องไม่กระทบ user experience
-        console.warn('[Gate2] DataGuard error (non-fatal):', guardErr);
-      }
 
     } catch (err: any) {
       // Graceful fallback
@@ -174,8 +160,8 @@ class AIService {
     const agentHistory = this.chatHistories.get(agentId) || [];
     this.chatHistories.set(agentId, [
       ...agentHistory,
-      { role: 'user', content: text },
-      { role: 'assistant', content: responseText },
+      { role: 'user' as const, content: text },
+      { role: 'assistant' as const, content: responseText },
     ].slice(-20));
 
     // 8. Persist agent response (non-blocking)
@@ -301,7 +287,7 @@ class AIService {
       || (import.meta as any).env?.['VITE_CLAUDE_MODEL']
       || 'claude-haiku-4-5-20251001';
 
-    const userApiKey = (import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined)
+    const userApiKey = ((import.meta as any).env?.VITE_ANTHROPIC_API_KEY as string | undefined)
       || (typeof localStorage !== 'undefined' ? localStorage.getItem('socialFactory_anthropicKey') : null);
     const apiUrl = userApiKey
       ? 'https://api.anthropic.com/v1/messages'
