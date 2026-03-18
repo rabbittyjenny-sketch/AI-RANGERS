@@ -9,6 +9,7 @@ import {
 import { getAllAgents } from '../data/agents';
 import { aiService } from '../services/aiService';
 import { databaseService } from '../services/databaseService';
+import { useVoiceInput } from '../hooks/useVoiceInput'; // <-- ADDED
 
 /* ═══════════════════════════════════════════════════
    CONSTANTS
@@ -25,13 +26,13 @@ const NEU = {
 
 const INDUSTRY_OPTIONS = [
     { value: '', label: '— เลือกประเภทธุรกิจ —' },
-    { value: 'food_beverage', label: '🍜  อาหาร & เครื่องดื่ม' },
-    { value: 'beauty_health', label: '💄  ความงาม & สุขภาพ' },
-    { value: 'fashion', label: '👗  แฟชั่น & เครื่องแต่งกาย' },
+    { value: 'food_beverage', label: '🍜  อาหาร \u0026 เครื่องดื่ม' },
+    { value: 'beauty_health', label: '💄  ความงาม \u0026 สุขภาพ' },
+    { value: 'fashion', label: '👗  แฟชั่น \u0026 เครื่องแต่งกาย' },
     { value: 'realestate', label: '🏠  อสังหาริมทรัพย์' },
-    { value: 'technology', label: '💻  เทคโนโลยี & ซอฟต์แวร์' },
-    { value: 'education', label: '📚  การศึกษา & อบรม' },
-    { value: 'travel', label: '✈️  ท่องเที่ยว & โรงแรม' },
+    { value: 'technology', label: '💻  เทคโนโลยี \u0026 ซอฟต์แวร์' },
+    { value: 'education', label: '📚  การศึกษา \u0026 อบรม' },
+    { value: 'travel', label: '✈️  ท่องเที่ยว \u0026 โรงแรม' },
     { value: 'other', label: '✏️  อื่นๆ (ระบุเอง)' },
 ];
 
@@ -52,7 +53,7 @@ const RANGERS = [
 const FontLoader = () => {
     useEffect(() => {
         const link = document.createElement('link');
-        link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700&display=swap';
+        link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700;800\u0026family=Sarabun:wght@300;400;500;600;700\u0026display=swap';
         link.rel = 'stylesheet';
         document.head.appendChild(link);
         const style = document.createElement('style');
@@ -65,7 +66,7 @@ const FontLoader = () => {
         document.head.appendChild(style);
     }, []);
     return null;
-};
+}
 
 /* ═══════════════════════════════════════════════════
    MARKDOWN RENDERER
@@ -336,7 +337,7 @@ const BrandPopupModal = ({ brands, activeBrandIdx, onSave, onClose }) => {
                 forbiddenWords: b.forbiddenWords ? b.forbiddenWords.split(',').map(s => s.trim()).filter(Boolean) : [],
                 primaryColor: b.primaryColor || '#5E9BEB',
                 moodKeywords: b.moodKeywords ? b.moodKeywords.split(',').map(s => s.trim()).filter(Boolean) : [],
-            }).catch(() => {});
+            }).catch(() => { });
         });
         setSaved(true);
         setTimeout(() => { setSaved(false); onClose(); }, 800);
@@ -516,8 +517,13 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [isListening, setIsListening] = useState(false);
-    const [speechSupported, setSpeechSupported] = useState(false);
+
+    // <-- REPLACED: useVoiceInput hook replaces Web Speech API state
+    const { isListening, isTranscribing, toggle: handleSpeechToggle, 
+        error: voiceError } = useVoiceInput({
+    onResult: (text) => setInputValue(prev => prev ? prev + ' ' + text : text),
+    onError: (msg) => setError(msg),
+});
     const [attachments, setAttachments] = useState([]);
     const [previewUrls, setPreviewUrls] = useState({});
     const [outputs, setOutputs] = useState(() => {
@@ -552,7 +558,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [activeBrandIdx, setActiveBrandIdx] = useState(0);
 
     const messagesEndRef = useRef(null);
-    const recognitionRef = useRef(null);
+    // recognitionRef REMOVED — replaced by useVoiceInput hook
     const fileInputRef = useRef(null);
     const textareaRef = useRef(null);
 
@@ -571,19 +577,10 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
         });
 
     /* ─── Effects ─── */
+    // Remove Web Speech API setup; use hook error if any
     useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            setSpeechSupported(true);
-            const r = new SpeechRecognition();
-            r.continuous = false; r.interimResults = true; r.lang = 'th-TH';
-            r.onstart = () => setIsListening(true);
-            r.onend = () => setIsListening(false);
-            r.onresult = ev => { let t = ''; for (let i = ev.resultIndex; i < ev.results.length; i++) t += ev.results[i][0].transcript; if (t) setInputValue(t); };
-            r.onerror = () => setIsListening(false);
-            recognitionRef.current = r;
-        }
-    }, []);
+        if (voiceError) setError(voiceError);
+    }, [voiceError]);
 
     useEffect(() => {
         if (masterContext) aiService.initialize(masterContext);
@@ -602,7 +599,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
 
     /* Persist outputs to localStorage (เก็บล่าสุด 30 รายการ) */
     useEffect(() => {
-        try { localStorage.setItem('ranger_outputs', JSON.stringify(outputs.slice(-30))); } catch {}
+        try { localStorage.setItem('ranger_outputs', JSON.stringify(outputs.slice(-30))); } catch { }
     }, [outputs]);
 
     /* Sync active brand → masterContext */
@@ -642,7 +639,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                 });
                 return merged;
             });
-        }).catch(() => {});
+        }).catch(() => { });
     }, []);
 
     /* Persist brands */
@@ -721,7 +718,8 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     };
 
     const handleKeyDown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } };
-    const handleSpeechToggle = () => { if (!recognitionRef.current) return; if (isListening) recognitionRef.current.stop(); else { setInputValue(''); recognitionRef.current.start(); } };
+
+
     const handleFileSelect = e => {
         Array.from(e.target.files || []).forEach(file => {
             if (file.size > 10 * 1024 * 1024) { setError(`ไฟล์ ${file.name} ใหญ่เกินไป`); return; }
@@ -772,16 +770,31 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                         </div>
                         <span style={{ fontSize: '0.76rem', fontWeight: 600, color: '#475569' }}>{currentUser?.name || activeBrand?.name || 'ผู้ใช้'}</span>
                     </div>
-                    {/* Guidebook */}
-                    <button className="topbar-guidebook-btn" onClick={() => setShowGuidebook(true)} title="คู่มือ"
-                        style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#64748b', ...NEU.raisedXs }}>
-                        <BookOpen size={15} />
-                    </button>
-                    {/* Logout */}
-                    <button title="ออกจากระบบ" onClick={() => { if (window.confirm('ออกจากระบบแล้วจะล้างประวัติแชทในเซสชั่นนี้ ต้องการออกจากระบบไหมคะ?')) { sessionStorage.clear(); window.location.reload(); } }}
-                        style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
-                        <LogOut size={15} />
-                    </button>
+
+                    {/* Voice Mode button (Topbar) */}
+                    { /* Using isTranscribing to disable while waiting for STT */ }
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        { /* Guidebook */ }
+                        <button className="topbar-guidebook-btn" onClick={() => setShowGuidebook(true)} title="คู่มือ"
+                            style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#64748b', ...NEU.raisedXs }}>
+                            <BookOpen size={15} />
+                        </button>
+
+                        {/* Voice button */}
+                        <button type="button" onClick={handleSpeechToggle} disabled={isLoading || isTranscribing}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 99, border: 'none', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700,
+                                ...(isListening ? { background: '#10b981', color: '#fff', boxShadow: '0 0 0 3px rgba(16,185,129,0.12)' } : { background: BG, color: '#64748b', ...NEU.raisedXs })
+                            }}>
+                            <Mic size={14} /> {isListening ? 'กำลังฟัง…' : (isTranscribing ? 'กำลังแปลง…' : 'Voice Mode')}
+                        </button>
+
+                        {/* Logout */}
+                        <button title="ออกจากระบบ" onClick={() => { if (window.confirm('ออกจากระบบแล้วจะล้างประวัติแชทในเซสชั่นนี้ ต้องการออกจากระบบไหมคะ?')) { sessionStorage.clear(); window.location.reload(); } }}
+                            style={{ background: BG, border: 'none', borderRadius: 11, padding: '6px 9px', cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
+                            <LogOut size={15} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* ══ PANELS ══════════════════════════════════════════════════════ */}
@@ -891,7 +904,6 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                             <div className="chat-messages-inner" style={{ width: '100%', maxWidth: 900, margin: '0 auto', padding: '24px 38px 10px' }}>
                                 {!selectedRanger ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '50px 20px', textAlign: 'center' }}>
-                                        
                                         <p style={{ fontWeight: 700, fontSize: '0.95rem', color: '#475569', marginBottom: 8 }}>เลือก Ranger เพื่อเริ่มต้น</p>
                                         <p style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 260, lineHeight: 1.75 }}>คลิก Ranger ในรายการด้านซ้ายเพื่อเริ่มบทสนทนา</p>
                                     </div>
@@ -910,342 +922,132 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
                                                     style={{ display: 'flex', justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start', marginBottom: 13 }}>
                                                     <div style={{ display: 'flex', gap: 9, maxWidth: '82%', flexDirection: msg.sender === 'user' ? 'row-reverse' : 'row' }}>
                                                         {msg.sender === 'agent' && (
-                                                            <div style={{ width: 31, height: 31, borderRadius: 9, background: selectedRanger?.color + '14', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2, ...NEU.raisedXs, overflow: 'hidden' }}>
-                                                                {msg.isError ? <AlertCircle size={15} color="#f87171" /> :
-                                                                    <img src={selectedRanger?.img} alt="" style={{ width: 25, height: 25, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />}
+                                                            <div style={{ width: 34, height: 34, borderRadius: 9, background: selectedRanger.color + '14', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                <img src={selectedRanger.img} alt="" style={{ width: 24, height: 24, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
                                                             </div>
                                                         )}
-                                                        <div style={{
-                                                            borderRadius: 19, padding: '10px 14px',
-                                                            ...(msg.isError ? { background: '#FEF2F2', border: '1px solid #FECACA', color: '#b91c1c', borderRadius: '19px 19px 19px 4px' }
-                                                                : msg.sender === 'user'
-                                                                    ? { background: '#5E9BEB', color: '#fff', borderRadius: '19px 19px 4px 19px', boxShadow: '3px 3px 10px rgba(94,155,235,.3)' }
-                                                                    : { background: BG, borderRadius: '19px 19px 19px 4px', ...NEU.raisedSm })
-                                                        }}>
-                                                            {msg.sender === 'user'
-                                                                ? <p style={{ fontSize: '0.83rem', margin: 0, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{msg.text}</p>
-                                                                : <MarkdownText text={msg.text} />
-                                                            }
-                                                            <div style={{ fontSize: '0.63rem', marginTop: 5, display: 'flex', gap: 7, color: msg.sender === 'user' ? 'rgba(255,255,255,.6)' : '#94a3b8', justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start' }}>
-                                                                <span>{(msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
-                                                                {msg.confidence && msg.confidence < 100 && <span>🎯 {Math.round(msg.confidence <= 1 ? msg.confidence * 100 : msg.confidence)}%</span>}
-                                                            </div>
+                                                        <div style={{ background: msg.sender === 'user' ? '#111827' : BG, color: msg.sender === 'user' ? '#fff' : '#334155', padding: '10px 12px', borderRadius: 12, ...NEU.raisedSm }}>
+                                                            {msg.sender === 'user' ? <div style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <MarkdownText text={msg.text} />}
+                                                            {msg.attachments && msg.attachments.length > 0 && (
+                                                                <div style={{ marginTop: 8 }}>
+                                                                    {msg.attachments.map(a => (
+                                                                        <div key={a.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 9px', background: '#fff', borderRadius: 9, border: '1px solid rgba(209,217,230,0.6)', marginRight: 6 }}>
+                                                                            <FileText size={14} /> <span style={{ fontSize: '0.78rem' }}>{a.name}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {msg.isError && <div style={{ marginTop: 6, color: '#ef4444', fontSize: '0.75rem' }}>{msg.text}</div>}
                                                         </div>
                                                     </div>
                                                 </motion.div>
                                             );
                                         })}
-                                        {isLoading && (
-                                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 13 }}>
-                                                <div style={{ display: 'flex', gap: 9 }}>
-                                                    <div style={{ width: 31, height: 31, borderRadius: 9, background: selectedRanger?.color + '14', display: 'flex', alignItems: 'center', justifyContent: 'center', ...NEU.raisedXs, overflow: 'hidden' }}>
-                                                        <img src={selectedRanger?.img} alt="" style={{ width: 25, height: 25, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none' }} />
-                                                    </div>
-                                                    <div style={{ background: BG, borderRadius: '19px 19px 19px 4px', padding: '13px 17px', ...NEU.raisedSm }}>
-                                                        <div style={{ display: 'flex', gap: 5, alignItems: 'center', height: 15 }}>
-                                                            {[0, 0.18, 0.36].map((d, i) => (
-                                                                <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: '#5E9BEB', animation: `typingdot 0.8s ease-in-out ${d}s infinite` }} />
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </motion.div>
-                                        )}
+                                        <div ref={messagesEndRef} />
                                     </>
                                 )}
-                                <div ref={messagesEndRef} />
                             </div>
                         </div>
 
-                        {/* ── Input Bar ── */}
-                        <div className="input-bar-outer" style={{ flexShrink: 0, padding: '16px 20px 24px', background: BG, borderTop: '1px solid rgba(255,255,255,0.8)' }}>
-                            {/* Attachment previews */}
+                        {/* ── Composer ── */}
+                        <div style={{ flexShrink: 0, padding: '10px 16px 16px', borderTop: '1px solid rgba(209,217,230,0.5)', background: BG }}>
+                            <form onSubmit={handleSend} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                                <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                                    <div style={{ flex: 1, background: '#fff', borderRadius: 14, padding: 8, ...NEU.raisedSm }}>
+                                        <textarea ref={textareaRef} value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={handleKeyDown}
+                                            placeholder="พิมพ์ข้อความหรือกดไมค์แล้วพูด..." style={{ width: '100%', minHeight: 48, maxHeight: 180, resize: 'none', border: 'none', outline: 'none', fontSize: '0.92rem', background: 'transparent' }} />
+                                    </div>
+
+                                    {/* Attach / Preview */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileSelect} />
+                                        <button type="button" onClick={() => fileInputRef.current?.click()} title="แนบไฟล์" style={{ background: BG, border: 'none', borderRadius: 12, padding: 10, cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
+                                            <Paperclip size={16} />
+                                        </button>
+
+                                        {/* Big Mic button (bottom composer) */}
+                                        <button type="button" onClick={handleSpeechToggle} disabled={isLoading || isTranscribing} title="สั่งงานด้วยเสียง"
+                                            style={{
+                                                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 12px', borderRadius: 14, border: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 700,
+                                                ...(isListening ? { background: '#10b981', color: '#fff', boxShadow: 'inset 2px 2px 6px rgba(0,0,0,0.08)' } : { background: BG, color: '#475569', ...NEU.raisedSm })
+                                            }}>
+                                            <Mic size={16} /> {isListening ? 'กำลังฟัง...' : (isTranscribing ? 'กำลังแปลง...' : 'Mic Start')}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button type="submit" disabled={isLoading} style={{ background: 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)', color: '#fff', border: 'none', borderRadius: 12, padding: '10px 14px', cursor: 'pointer', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <Send size={16} /> ส่ง
+                                    </button>
+                                </div>
+                            </form>
+
+                            {/* Attach previews */}
                             {attachments.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 7 }}>
-                                    {attachments.map(att => (
-                                        <div key={att.name} style={{ position: 'relative' }}>
-                                            {att.type.startsWith('image/') ? (
-                                                <>
-                                                    <img src={previewUrls[att.name]} alt={att.name} style={{ width: 50, height: 50, objectFit: 'cover', borderRadius: 9, display: 'block' }} />
-                                                    <button onClick={() => removeAttachment(att.name)} style={{ position: 'absolute', top: -4, right: -4, width: 15, height: 15, borderRadius: '50%', background: '#f87171', border: 'none', cursor: 'pointer', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
-                                                </>
-                                            ) : (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: BG, borderRadius: 9, padding: '4px 8px', ...NEU.insetXs }}>
-                                                    <FileText size={12} color="#64748b" />
-                                                    <span style={{ fontSize: '0.7rem', color: '#64748b', maxWidth: 75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{att.name}</span>
-                                                    <button onClick={() => removeAttachment(att.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: 0 }}><X size={10} /></button>
-                                                </div>
-                                            )}
+                                <div style={{ marginTop: 10, display: 'flex', gap: 8, overflowX: 'auto' }}>
+                                    {attachments.map(a => (
+                                        <div key={a.name} style={{ background: BG, padding: 8, borderRadius: 12, display: 'flex', alignItems: 'center', gap: 8, ...NEU.raisedXs }}>
+                                            {previewUrls[a.name] ? <img src={previewUrls[a.name]} alt={a.name} style={{ width: 60, height: 40, objectFit: 'cover', borderRadius: 8 }} /> : <FileText size={18} />}
+                                            <div style={{ fontSize: '0.8rem' }}>{a.name}</div>
+                                            <button onClick={() => removeAttachment(a.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }}><X size={14} /></button>
                                         </div>
                                     ))}
                                 </div>
                             )}
-
-                            {/* Outer card for Input */}
-                            <div style={{ background: BG, borderRadius: 30, ...NEU.raised, padding: '8px 10px 10px' }}>
-                                {/* Top label row */}
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 10px 2px' }}>
-                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Input Command</span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                        <button type="button" onClick={() => attachments.length < 5 ? fileInputRef.current?.click() : setError('แนบได้สูงสุด 5 ไฟล์')}
-                                            disabled={isLoading}
-                                            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', ...NEU.raisedXs, position: 'relative' }}>
-                                            <Paperclip size={11} /> Attach
-                                            {attachments.length > 0 && <span style={{ position: 'absolute', top: -3, right: -3, width: 13, height: 13, borderRadius: '50%', background: '#5E9BEB', color: '#fff', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{attachments.length}</span>}
-                                        </button>
-                                        {speechSupported && (
-                                            <button type="button" onClick={handleSpeechToggle} disabled={isLoading}
-                                                style={{
-                                                    display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, border: 'none', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700, transition: 'all 0.2s',
-                                                    ...(isListening ? { background: '#10b981', color: '#fff', boxShadow: '0 0 0 3px rgba(16,185,129,0.2)' } : { background: BG, color: '#64748b', ...NEU.raisedXs })
-                                                }}>
-                                                <Mic size={11} /> {isListening ? 'กำลังฟัง…' : 'Voice Mode'}
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Textarea */}
-                                <div style={{ background: BG, borderRadius: 15, ...NEU.inset, margin: '3px 4px 5px' }}>
-                                    <textarea ref={textareaRef} value={inputValue}
-                                        onChange={e => { setInputValue(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 118) + 'px'; }}
-                                        onKeyDown={handleKeyDown} disabled={isLoading || !selectedId} rows={1}
-                                        placeholder={isListening ? '🎙 กำลังฟัง...' : selectedRanger ? `บอก${selectedRanger.name}ว่าต้องการอะไร...` : 'เลือก Ranger ก่อนพิมพ์...'}
-                                        style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: '9px 13px', fontSize: '0.83rem', color: '#334155', resize: 'none', maxHeight: 118, lineHeight: 1.65, boxSizing: 'border-box', fontFamily: "'Noto Sans Thai','Sarabun',system-ui,sans-serif" }} />
-                                </div>
-
-                                {/* Bottom: Mic Start + Create (Symmetric Twin Buttons) */}
-                                <div style={{ display: 'flex', gap: 12, padding: '4px 6px 2px' }}>
-                                    {speechSupported && (
-                                        <button type="button" onClick={handleSpeechToggle}
-                                            style={{
-                                                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px', borderRadius: 24, border: 'none', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700, transition: 'all 0.2s',
-                                                ...(isListening ? { background: '#10b981', color: '#fff', boxShadow: 'inset 2px 2px 6px rgba(0,0,0,0.1)' } : { background: BG, color: '#475569', ...NEU.raisedSm })
-                                            }}>
-                                            <Mic size={14} /> {isListening ? 'กำลังฟัง...' : 'Mic Start'}
-                                        </button>
-                                    )}
-                                    <motion.button onClick={handleSend}
-                                        disabled={isLoading || (!inputValue.trim() && attachments.length === 0) || !selectedId}
-                                        whileTap={{ scale: 0.96 }}
-                                        style={{
-                                            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 16px', borderRadius: 24, border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, color: '#fff',
-                                            background: 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)',
-                                            boxShadow: '3px 3px 10px rgba(94,155,235,0.4), -2px -2px 6px rgba(255,255,255,0.8)',
-                                            opacity: (isLoading || (!inputValue.trim() && attachments.length === 0) || !selectedId) ? 0.44 : 1
-                                        }}>
-                                        <Send size={14} /> Create →
-                                    </motion.button>
-                                </div>
-                            </div>
-                            <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileSelect}
-                                accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" />
                         </div>
                     </div>
 
-                    {/* ── PANEL 3: RIGHT (File Work + Brand) ─────────────────────── */}
-                    <AnimatePresence>
-                        {(isMobile ? mobileRightOpen : rightPanelOpen) && (
-                            <motion.aside
-                                className={`panel-right${isMobile ? ' panel-right-modal' : ''}`}
-                                initial={isMobile ? { y: '100%', opacity: 0 } : { width: 0, opacity: 0 }}
-                                animate={isMobile ? { y: 0, opacity: 1 } : { width: 308, opacity: 1 }}
-                                exit={isMobile ? { y: '100%', opacity: 0 } : { width: 0, opacity: 0 }}
-                                transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-                                style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid rgba(209,217,230,0.6)', background: BG, overflow: 'hidden' }}>
+                    {/* ── PANEL 3: RIGHT (STUDIO) ─────────────────────────────────── */}
+                    <div className="panel-right" style={{ width: rightPanelOpen ? 420 : 0, flexShrink: 0, transition: 'width 0.22s', overflow: 'hidden', borderLeft: '1px solid rgba(255,255,255,0.7)', background: BG }}>
+                        <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderBottom: '1px solid rgba(209,217,230,0.5)' }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <div style={{ fontWeight: 800, color: '#334155' }}>Studio</div>
+                                <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{outputs.length} ผลลัพธ์</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <button onClick={() => setP3Tab('files')} style={{ background: p3Tab === 'files' ? '#fff' : BG, border: 'none', padding: '8px 10px', borderRadius: 9, cursor: 'pointer', ...NEU.raisedXs }}>ไฟล์</button>
+                                <button onClick={() => setP3Tab('brand')} style={{ background: p3Tab === 'brand' ? '#fff' : BG, border: 'none', padding: '8px 10px', borderRadius: 9, cursor: 'pointer', ...NEU.raisedXs }}>แบรนด์</button>
+                            </div>
+                        </div>
 
-                                {/* Panel 3 Header + tab switcher */}
-                                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', borderBottom: '1px solid rgba(209,217,230,0.5)' }}>
-                                    {/* Tabs */}
-                                    <div style={{ flex: 1, display: 'flex', gap: 6 }}>
-                                        {[{ key: 'files', label: '📁 ไฟล์งาน' }, { key: 'brand', label: '⚙ แบรนด์' }].map(tab => (
-                                            <button key={tab.key} onClick={() => setP3Tab(tab.key)}
-                                                style={{
-                                                    padding: '5px 12px', borderRadius: 99, border: 'none', cursor: 'pointer', fontSize: '0.73rem', fontWeight: 700, transition: 'all 0.2s',
-                                                    ...(p3Tab === tab.key ? { background: '#5E9BEB', color: '#fff', boxShadow: '2px 2px 6px rgba(94,155,235,0.3)' } : { background: BG, color: '#64748b', ...NEU.raisedXs })
-                                                }}>
-                                                {tab.label}
-                                                {tab.key === 'files' && outputs.length > 0 && (
-                                                    <span style={{ marginLeft: 4, background: p3Tab === 'files' ? 'rgba(255,255,255,0.3)' : '#5E9BEB', color: '#fff', borderRadius: 99, padding: '0 5px', fontSize: 9, fontWeight: 700 }}>{outputs.length}</span>
-                                                )}
-                                            </button>
+                        <div style={{ padding: '12px', overflowY: 'auto', height: 'calc(100vh - 140px)' }}>
+                            {p3Tab === 'files' ? (
+                                <>
+                                    {outputs.length === 0 ? <div style={{ color: '#94a3b8' }}>ยังไม่มีผลลัพธ์</div> : outputs.slice().reverse().map((o, i) => <OutputCard key={i} output={o} index={i} />)}
+                                </>
+                            ) : (
+                                <>
+                                    <div style={{ marginBottom: 12 }}>
+                                        <div style={{ fontWeight: 700, color: '#334155' }}>แบรนด์ที่บันทึก</div>
+                                        {brands.map((b, idx) => (
+                                            <div key={b.id} style={{ background: BG, borderRadius: 10, padding: '8px 10px', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                    <div style={{ width: 28, height: 28, borderRadius: 8, background: b.primaryColor + '22', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+                                                    <div>
+                                                        <div style={{ fontWeight: 700 }}>{b.name}</div>
+                                                        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{b.industry}</div>
+                                                    </div>
+                                                </div>
+                                                <div style={{ display: 'flex', gap: 8 }}>
+                                                    <button onClick={() => { setActiveBrandIdx(idx); setShowBrandModal(true); }} style={{ background: BG, border: 'none', padding: 8, borderRadius: 8, cursor: 'pointer', ...NEU.raisedXs }}><FileText size={14} /></button>
+                                                </div>
+                                            </div>
                                         ))}
                                     </div>
-                                    <button onClick={() => setRightPanelOpen(false)} style={{ background: BG, border: 'none', borderRadius: 9, padding: 5, cursor: 'pointer', color: '#94a3b8', ...NEU.raisedXs }}>
-                                        <X size={13} />
-                                    </button>
-                                </div>
-
-                                {/* Tab: File Work */}
-                                {p3Tab === 'files' && (
-                                    <div style={{ flex: 1, overflowY: 'auto', padding: '11px 10px', minHeight: 0 }}>
-                                        {outputs.length === 0 ? (
-                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', padding: 22 }}>
-                                                <div style={{ width: 50, height: 50, borderRadius: 16, background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 11, ...NEU.raised }}>
-                                                    <FileText size={21} color="#c4ccd6" />
-                                                </div>
-                                                <p style={{ fontSize: '0.78rem', fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>ยังไม่มีไฟล์งาน</p>
-                                                <p style={{ fontSize: '0.7rem', color: '#c4ccd6', lineHeight: 1.65, margin: 0 }}>เมื่อ Ranger สร้างเอกสาร<br />หรือไฟล์งาน จะแสดงที่นี่</p>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9, paddingLeft: 2 }}>
-                                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em' }}>ผลงาน</span>
-                                                    <button onClick={() => setOutputs([])} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.66rem', color: '#f87171', fontWeight: 600 }}>ล้างทั้งหมด</button>
-                                                </div>
-                                                {outputs.map((o, i) => <OutputCard key={o.id || i} output={o} index={i} />)}
-                                            </>
-                                        )}
-                                        {outputs.length > 0 && (
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 6 }}>
-                                                <button onClick={() => {
-                                                    const content = outputs.map((o, i) => `=== ${i + 1}. ${o.title || 'ผลลัพธ์'} (by ${o.agentName || 'Ranger'}) ===\n${o.content || o.text || ''}`).join('\n\n---\n\n');
-                                                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-                                                    const url = URL.createObjectURL(blob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = `AI_Rangers_${new Date().toLocaleDateString('th-TH').replace(/\//g, '-')}.txt`;
-                                                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                                                    URL.revokeObjectURL(url);
-                                                }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
-                                                    <Download size={12} /> ส่งออก
-                                                </button>
-                                                <button onClick={() => {
-                                                    const content = outputs.map((o, i) => `=== ${i + 1}. ${o.title || 'ผลลัพธ์'} ===\n${o.content || o.text || ''}`).join('\n\n---\n\n');
-                                                    navigator.clipboard.writeText(content);
-                                                }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '7px', borderRadius: 11, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600, color: '#64748b', ...NEU.raisedSm }}>
-                                                    <Copy size={12} /> คัดลอก
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Tab: Brand — summary cards + edit via popup */}
-                                {p3Tab === 'brand' && (
-                                    <div style={{ flex: 1, overflowY: 'auto', padding: '11px 10px', minHeight: 0 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingLeft: 2 }}>
-                                            <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em' }}>YOUR BRAND ({brands.length}/3)</span>
-                                        </div>
-
-                                        {/* Brand summary cards */}
-                                        {brands.map((b, idx) => {
-                                            const industryLabel = INDUSTRY_OPTIONS.find(o => o.value === b.industry)?.label?.replace(/^.{2}\s*/, '') || b.industryOther || '';
-                                            return (
-                                                <div key={b.id} style={{ background: BG, borderRadius: 16, padding: '12px 13px', marginBottom: 9, ...NEU.raisedSm, border: idx === activeBrandIdx ? '1.5px solid #5E9BEB' : '1.5px solid transparent' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                                                        <div style={{ width: 32, height: 32, borderRadius: 10, background: b.name ? '#5E9BEB14' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, ...NEU.raisedXs }}>
-                                                            <Building2 size={14} color={b.name ? '#5E9BEB' : '#94a3b8'} />
-                                                        </div>
-                                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                                            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: b.name ? '#334155' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                                {b.name || 'ยังไม่ได้ระบุชื่อแบรนด์'}
-                                                            </div>
-                                                            {industryLabel && <div style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: 1 }}>{industryLabel}</div>}
-                                                        </div>
-                                                        {idx === activeBrandIdx
-                                                            ? <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#10b981', background: '#d1fae5', borderRadius: 99, padding: '2px 9px', flexShrink: 0, whiteSpace: 'nowrap' }}>ใช้งานอยู่</span>
-                                                            : <button onClick={() => { setActiveBrandIdx(idx); if (b.name) { const ctx = buildContext(b); onContextUpdate?.(ctx); aiService.initialize(ctx); } }}
-                                                                style={{ fontSize: '0.62rem', fontWeight: 600, color: '#5E9BEB', background: BG, border: 'none', borderRadius: 99, padding: '2px 9px', cursor: 'pointer', flexShrink: 0, ...NEU.raisedXs, whiteSpace: 'nowrap' }}>เลือกใช้</button>
-                                                        }
-                                                    </div>
-                                                    {b.usp && <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '7px 0 0', lineHeight: 1.55, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{b.usp}</p>}
-                                                </div>
-                                            );
-                                        })}
-
-                                        {/* Edit button → opens popup */}
-                                        <button onClick={() => setShowBrandModal(true)}
-                                            style={{ width: '100%', padding: '10px', borderRadius: 14, border: 'none', background: 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: '#fff', fontSize: '0.78rem', fontWeight: 700, boxShadow: '3px 3px 10px rgba(94,155,235,0.3)', marginTop: 4 }}>
-                                            <Building2 size={13} /> แก้ไข / จัดการข้อมูลแบรนด์
-                                        </button>
-                                    </div>
-                                )}
-                            </motion.aside>
-                        )}
-                    </AnimatePresence>
-
-                </div>{/* end panels */}
-            </div>
-
-            {/* ── Modals ── */}
-            <AnimatePresence>
-                {showComingSoon && <ComingSoonModal onClose={() => setShowComingSoon(false)} />}
-                {showGuidebook && <GuidebookModal onClose={() => setShowGuidebook(false)} />}
-                {showBrandModal && (
-                    <BrandPopupModal
-                        brands={brands}
-                        activeBrandIdx={activeBrandIdx}
-                        onSave={(newBrands, newActiveIdx) => {
-                            setBrands(newBrands);
-                            setActiveBrandIdx(newActiveIdx);
-                            try { localStorage.setItem('ranger_brands', JSON.stringify(newBrands)); } catch { }
-                            if (newBrands[newActiveIdx]?.name) {
-                                const ctx = buildContext(newBrands[newActiveIdx]);
-                                onContextUpdate?.(ctx);
-                                aiService.initialize(ctx);
-                            }
-                        }}
-                        onClose={() => setShowBrandModal(false)} />
-                )}
-            </AnimatePresence>
-
-            {/* ── Mobile Bottom Tab Bar (Rangers) ── */}
-            {isMobile && (
-                <nav className="mobile-tab-bar">
-                    {/* Rangers tabs */}
-                    {RANGERS.filter(r => !r.comingSoon).map(ranger => {
-                        const msgCount = chatSessions[ranger.id]?.length || 0;
-                        const isActive = ranger.id === selectedId;
-                        return (
-                            <button
-                                key={ranger.id}
-                                className={`mobile-tab-btn${isActive ? ' active' : ''}`}
-                                onClick={() => handleSelectRanger(ranger)}
-                            >
-                                {!isActive && msgCount > 1 && (
-                                    <span className="mobile-tab-badge">{msgCount > 9 ? '9+' : msgCount}</span>
-                                )}
-                                <img
-                                    src={ranger.img}
-                                    alt={ranger.name}
-                                    className="mobile-tab-ranger-img"
-                                    onError={e => { e.target.style.display = 'none'; }}
-                                />
-                                <span className="mobile-tab-label">{ranger.name}</span>
-                            </button>
-                        );
-                    })}
-                    {/* Files/Brand toggle */}
-                    <button
-                        className={`mobile-tab-btn${mobileRightOpen ? ' active' : ''}`}
-                        onClick={() => setMobileRightOpen(v => !v)}
-                        style={{ position: 'relative' }}
-                    >
-                        {outputs.length > 0 && !mobileRightOpen && (
-                            <span className="mobile-tab-badge">{outputs.length > 9 ? '9+' : outputs.length}</span>
-                        )}
-                        <div style={{ width: 34, height: 34, borderRadius: 10, background: mobileRightOpen ? '#5E9BEB14' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <FileText size={16} color={mobileRightOpen ? '#5E9BEB' : '#94a3b8'} />
+                                </>
+                            )}
                         </div>
-                        <span className="mobile-tab-label" style={{ color: mobileRightOpen ? '#5E9BEB' : '#94a3b8' }}>ไฟล์/แบรนด์</span>
-                    </button>
-                    {/* Coming Soon */}
-                    <button
-                        className="mobile-tab-btn"
-                        onClick={() => setShowComingSoon(true)}
-                        style={{ opacity: 0.5 }}
-                    >
-                        <img
-                            src={RANGERS.find(r => r.comingSoon)?.img}
-                            alt="Coming Soon"
-                            className="mobile-tab-ranger-img"
-                            onError={e => { e.target.style.display = 'none'; }}
-                        />
-                        <span className="mobile-tab-label">งง?</span>
-                    </button>
-                </nav>
-            )}
+                    </div>
+                </div>
+
+                {/* Modals */}
+                <AnimatePresence>
+                    {showComingSoon && <ComingSoonModal onClose={() => setShowComingSoon(false)} />}
+                    {showGuidebook && <GuidebookModal onClose={() => setShowGuidebook(false)} />}
+                    {showBrandModal && <BrandPopupModal brands={brands} activeBrandIdx={activeBrandIdx} onSave={(b, idx) => { setBrands(b); setActiveBrandIdx(idx); }} onClose={() => setShowBrandModal(false)} />}
+                </AnimatePresence>
+            </div>
         </>
     );
 };
