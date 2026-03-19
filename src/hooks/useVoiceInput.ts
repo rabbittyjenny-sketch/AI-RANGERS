@@ -3,7 +3,7 @@
  * กดปุ่ม Mic → พูด → ข้อความขึ้น real-time ทันที
  * VAD ตัดเองเมื่อเงียบ — ไม่ต้องกดหยุด
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useScribe } from '@elevenlabs/react';
 
 export interface UseVoiceInputOptions {
@@ -22,16 +22,22 @@ export interface UseVoiceInputReturn {
 
 export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
   const [error, setError] = useState<string | null>(null);
+  const onResultRef = useRef(onResult);
+  const onErrorRef = useRef(onError);
+  onResultRef.current = onResult;
+  onErrorRef.current = onError;
 
   const scribe = useScribe({
     modelId: 'scribe_v2_realtime',
-    onPartialTranscript: (data) => {
-      // ข้อความขึ้น real-time ขณะพูด — ไม่ต้องทำอะไร UI จะแสดงผ่าน partialTranscript
-    },
     onCommittedTranscript: (data) => {
       if (data.text?.trim()) {
-        onResult(data.text.trim());
+        onResultRef.current(data.text.trim());
       }
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : 'Voice error ค่ะ';
+      setError(msg);
+      onErrorRef.current?.(msg);
     },
   });
 
@@ -55,9 +61,9 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
     } catch (err: any) {
       const msg = err.message || 'ไม่สามารถเริ่ม Voice ได้ค่ะ';
       setError(msg);
-      onError?.(msg);
+      onErrorRef.current?.(msg);
     }
-  }, [scribe, onResult, onError]);
+  }, [scribe]);
 
   const stop = useCallback(() => {
     scribe.disconnect();
