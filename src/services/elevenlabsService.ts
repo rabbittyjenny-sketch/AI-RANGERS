@@ -80,7 +80,7 @@ export const isSpeaking = () => currentAudio !== null && !currentAudio.paused;
 /** ส่ง audio blob ไป ElevenLabs Scribe → ได้ text กลับมา */
 export async function transcribeAudio(audioBlob: Blob): Promise<STTResult> {
   const formData = new FormData();
-  formData.append('audio', audioBlob, 'recording.webm');
+  formData.append('file', audioBlob, 'recording.webm');
   formData.append('model_id', 'scribe_v1');
 
   const res = await fetch('/api/elevenlabs/v1/speech-to-text', {
