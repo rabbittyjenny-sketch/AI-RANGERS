@@ -1,7 +1,6 @@
 /**
- * useVoiceInput — ใช้ ElevenLabs official useScribe hook
- * กดปุ่ม Mic → พูด → ข้อความขึ้น real-time ทันที
- * VAD ตัดเองเมื่อเงียบ — ไม่ต้องกดหยุด
+ * useVoiceInput — ElevenLabs Realtime STT
+ * ใช้ useScribe จาก @elevenlabs/react@0.13.0
  */
 import { useCallback, useRef, useState } from 'react';
 import { useScribe } from '@elevenlabs/react';
@@ -29,13 +28,23 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
 
   const scribe = useScribe({
     modelId: 'scribe_v2_realtime',
+    languageCode: 'th',
+    microphone: {
+      echoCancellation: true,
+      noiseSuppression: true,
+    },
     onCommittedTranscript: (data) => {
       if (data.text?.trim()) {
         onResultRef.current(data.text.trim());
       }
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : 'Voice error ค่ะ';
+      const msg = err instanceof Error ? err.message : 'Voice error';
+      setError(msg);
+      onErrorRef.current?.(msg);
+    },
+    onAuthError: (data) => {
+      const msg = data.error || 'Auth error';
       setError(msg);
       onErrorRef.current?.(msg);
     },
@@ -43,21 +52,22 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
 
   const toggle = useCallback(async () => {
     setError(null);
+
     if (scribe.isConnected) {
       scribe.disconnect();
       return;
     }
+
     try {
+      // ขอ token จาก backend — API key ปลอดภัยอยู่ใน Vercel env
       const res = await fetch('/api/elevenlabs-token', { method: 'POST' });
-      if (!res.ok) throw new Error('ไม่สามารถขอ token ได้ค่ะ');
-      const { token } = await res.json();
-      await scribe.connect({
-        token,
-        microphone: {
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
+      if (!res.ok) throw new Error('ขอ token ไม่ได้ค่ะ status: ' + res.status);
+      const data = await res.json();
+      if (!data.token) throw new Error(data.error || 'ไม่ได้รับ token ค่ะ');
+
+      // ส่ง token ผ่าน connect()
+      await scribe.connect({ token: data.token });
+
     } catch (err: any) {
       const msg = err.message || 'ไม่สามารถเริ่ม Voice ได้ค่ะ';
       setError(msg);
@@ -67,11 +77,12 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
 
   const stop = useCallback(() => {
     scribe.disconnect();
+    setError(null);
   }, [scribe]);
 
   return {
     isListening: scribe.isConnected,
-    isTranscribing: scribe.isConnected && !!scribe.partialTranscript,
+    isTranscribing: scribe.isTranscribing,
     partialText: scribe.partialTranscript || '',
     toggle,
     stop,
