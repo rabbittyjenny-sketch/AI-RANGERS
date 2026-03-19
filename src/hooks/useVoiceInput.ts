@@ -1,5 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { RealtimeSTT } from '../services/elevenlabsService';
+/**
+ * useVoiceInput — ใช้ ElevenLabs official useScribe hook
+ * กดปุ่ม Mic → พูด → ข้อความขึ้น real-time ทันที
+ * VAD ตัดเองเมื่อเงียบ — ไม่ต้องกดหยุด
+ */
+import { useCallback, useState } from 'react';
+import { useScribe } from '@elevenlabs/react';
 
 export interface UseVoiceInputOptions {
   onResult: (text: string) => void;
@@ -16,74 +21,54 @@ export interface UseVoiceInputReturn {
 }
 
 export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
-  const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [partialText, setPartialText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const sttRef = useRef<RealtimeSTT | null>(null);
-  const startingRef = useRef(false); // guard ป้องกัน start ซ้ำ
 
-  useEffect(() => {
-    return () => { sttRef.current?.stop(); };
-  }, []);
+  const scribe = useScribe({
+    modelId: 'scribe_v2_realtime',
+    onPartialTranscript: (data) => {
+      // ข้อความขึ้น real-time ขณะพูด — ไม่ต้องทำอะไร UI จะแสดงผ่าน partialTranscript
+    },
+    onCommittedTranscript: (data) => {
+      if (data.text?.trim()) {
+        onResult(data.text.trim());
+      }
+    },
+  });
+
+  const toggle = useCallback(async () => {
+    setError(null);
+    if (scribe.isConnected) {
+      scribe.disconnect();
+      return;
+    }
+    try {
+      const res = await fetch('/api/elevenlabs-token', { method: 'POST' });
+      if (!res.ok) throw new Error('ไม่สามารถขอ token ได้ค่ะ');
+      const { token } = await res.json();
+      await scribe.connect({
+        token,
+        microphone: {
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+    } catch (err: any) {
+      const msg = err.message || 'ไม่สามารถเริ่ม Voice ได้ค่ะ';
+      setError(msg);
+      onError?.(msg);
+    }
+  }, [scribe, onResult, onError]);
 
   const stop = useCallback(() => {
-    startingRef.current = false;
-    setIsListening(false);
-    setIsTranscribing(false);
-    setPartialText('');
-    sttRef.current?.stop().catch(() => {});
-    sttRef.current = null;
-  }, []);
+    scribe.disconnect();
+  }, [scribe]);
 
-  const start = useCallback(async () => {
-    // ป้องกัน double-call
-    if (startingRef.current || sttRef.current?.isActive()) return;
-    startingRef.current = true;
-
-    setError(null);
-    setPartialText('');
-
-    const stt = new RealtimeSTT({
-      onStart: () => {
-        startingRef.current = false;
-        setIsListening(true);
-        setIsTranscribing(false);
-      },
-      onPartial: (text) => {
-        setPartialText(text);
-        setIsTranscribing(true);
-      },
-      onCommitted: (text) => {
-        setPartialText('');
-        setIsTranscribing(false);
-        if (text.trim()) onResult(text.trim());
-      },
-      onError: (msg) => {
-        startingRef.current = false;
-        setError(msg);
-        onError?.(msg);
-        stop();
-      },
-      onStop: () => {
-        startingRef.current = false;
-        setIsListening(false);
-        setIsTranscribing(false);
-        setPartialText('');
-      },
-    });
-
-    sttRef.current = stt;
-    await stt.start();
-  }, [onResult, onError, stop]);
-
-  const toggle = useCallback(() => {
-    if (isListening) {
-      stop();
-    } else {
-      start();
-    }
-  }, [isListening, start, stop]);
-
-  return { isListening, isTranscribing, partialText, toggle, stop, error };
+  return {
+    isListening: scribe.isConnected,
+    isTranscribing: scribe.isConnected && !!scribe.partialTranscript,
+    partialText: scribe.partialTranscript || '',
+    toggle,
+    stop,
+    error,
+  };
 }
