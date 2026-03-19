@@ -2,7 +2,6 @@
   "functions": {
     "api/anthropic.js": { "maxDuration": 30 },
     "api/elevenlabs.js": { "maxDuration": 30 },
-    "api/elevenlabs-token.js": { "maxDuration": 10 }
   },
   "rewrites": [
     { "source": "/api/anthropic/v1/:path*", "destination": "/api/anthropic" },
