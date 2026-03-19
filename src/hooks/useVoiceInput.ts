@@ -1,25 +1,22 @@
 /**
  * useVoiceInput — React hook สำหรับ Realtime STT
- * ─────────────────────────────────────────────────────────────────────
- * กดปุ่ม Mic → เปิด WebSocket → พูด → ข้อความขึ้น real-time ทันที
- * VAD (Voice Activity Detection) หยุดเองเมื่อเงียบ — ไม่ต้องกดหยุด
- * รองรับทุก browser รวม iPhone Safari
- * ─────────────────────────────────────────────────────────────────────
+ * กดปุ่ม Mic → WebSocket เปิด → พูด → ข้อความขึ้น real-time ทันที
+ * VAD หยุดเองเมื่อเงียบ — ไม่ต้องกดหยุด
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { RealtimeSTT } from '../services/elevenlabsService';
 
 export interface UseVoiceInputOptions {
-  onResult: (text: string) => void;   // callback เมื่อได้ committed text
+  onResult: (text: string) => void;
   onError?: (message: string) => void;
 }
 
 export interface UseVoiceInputReturn {
-  isListening: boolean;       // กำลังฟัง + ส่ง audio อยู่
-  isTranscribing: boolean;    // กำลังรอ committed transcript
-  partialText: string;        // ข้อความ real-time ขณะพูด
-  toggle: () => void;         // กดเริ่ม/หยุด — ใช้เป็น handleSpeechToggle
+  isListening: boolean;
+  isTranscribing: boolean;
+  partialText: string;
+  toggle: () => void;
   stop: () => void;
   error: string | null;
 }
@@ -31,17 +28,17 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
   const [error, setError] = useState<string | null>(null);
   const sttRef = useRef<RealtimeSTT | null>(null);
 
-  // Cleanup เมื่อ unmount
   useEffect(() => {
     return () => { sttRef.current?.stop(); };
   }, []);
 
-  const stop = useCallback(async () => {
-    await sttRef.current?.stop();
-    sttRef.current = null;
+  const stop = useCallback(() => {
+    // reset UI ทันที ไม่รอ async
     setIsListening(false);
     setIsTranscribing(false);
     setPartialText('');
+    sttRef.current?.stop().catch(() => {});
+    sttRef.current = null;
   }, []);
 
   const start = useCallback(async () => {
@@ -54,12 +51,10 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
         setIsTranscribing(false);
       },
       onPartial: (text) => {
-        // ข้อความขึ้น real-time ขณะพูด
         setPartialText(text);
         setIsTranscribing(true);
       },
       onCommitted: (text) => {
-        // ข้อความสมบูรณ์ → ส่งให้ parent component
         setPartialText('');
         setIsTranscribing(false);
         if (text.trim()) onResult(text.trim());
