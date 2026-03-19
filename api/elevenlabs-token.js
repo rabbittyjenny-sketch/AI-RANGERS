@@ -1,7 +1,6 @@
 /**
- * Vercel Serverless Function — ElevenLabs Single-Use Token
- * สร้าง token สำหรับ Realtime STT WebSocket (scribe_v2_realtime)
- * API key ไม่เปิดเผยใน browser
+ * Vercel Serverless — ElevenLabs Single-Use Token
+ * สร้าง token สำหรับ Realtime STT WebSocket
  */
 
 export default async function handler(req, res) {
@@ -18,10 +17,7 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(
       'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
-      {
-        method: 'POST',
-        headers: { 'xi-api-key': apiKey },
-      }
+      { method: 'POST', headers: { 'xi-api-key': apiKey } }
     );
 
     if (!response.ok) {
