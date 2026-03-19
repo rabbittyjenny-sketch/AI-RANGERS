@@ -30,7 +30,7 @@
     "react-dom": "^19.2.3",
     "tailwind-merge": "^3.4.0",
     "vite": "^7.3.0",
-    "@elevenlabs/react": "^0.1.0",
+    "@elevenlabs/react": "^0.13.0",
     "@elevenlabs/elevenlabs-js": "^2.0.0"
   },
   "devDependencies": {
