@@ -6,6 +6,7 @@
   "rewrites": [
     { "source": "/api/anthropic/v1/:path*", "destination": "/api/anthropic" },
     { "source": "/api/elevenlabs/:path*",   "destination": "/api/elevenlabs" }
+    { "source": "/api/elevenlabs-token", "destination": "/api/elevenlabs-token" }
   ],
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
