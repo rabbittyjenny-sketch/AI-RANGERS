@@ -1,18 +1,23 @@
 /**
  * ElevenLabs Voice Service
  * ─────────────────────────────────────────────────────────────────────
- * STT (Speech-to-Text): VoiceRecorder + transcribeAudio()
- *   → ผู้ใช้กดปุ่ม Mic → อัดเสียง → ส่ง ElevenLabs Scribe API → ได้ text
+ * STT (Speech-to-Text): Realtime WebSocket — พูดแล้วข้อความขึ้นทันที
+ *   → กดปุ่ม Mic → WebSocket เปิด → พูด → partial_transcript ขึ้น real-time
+ *   → หยุดพูด (VAD) → committed_transcript → ข้อความสมบูรณ์
+ *   → รองรับทุก browser รวม iPhone Safari
  *
  * TTS (Text-to-Speech): speakText()
  *   → Rangers ตอบกลับ → แปลงเป็นเสียงพูดผ่าน ElevenLabs Rachel voice
  *
- * Proxy: ผ่าน /api/elevenlabs (Vercel serverless) → API key ไม่เปิดเผยใน browser
+ * Proxy: STT ผ่าน /api/elevenlabs-token (Vercel) เพื่อขอ single-use token
+ *        TTS ผ่าน /api/elevenlabs (Vercel serverless) → API key ไม่เปิดเผยใน browser
  * ─────────────────────────────────────────────────────────────────────
  */
 
 const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel — multilingual incl. Thai
 const MODEL_ID = 'eleven_multilingual_v2';
+const STT_MODEL_ID = 'scribe_v2_realtime';
+const WS_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime';
 
 export interface TTSOptions {
   voiceId?: string;
@@ -24,6 +29,14 @@ export interface TTSOptions {
 export interface STTResult {
   text: string;
   language?: string;
+}
+
+export interface RealtimeSTTCallbacks {
+  onPartial: (text: string) => void;      // ข้อความ real-time ขณะพูด
+  onCommitted: (text: string) => void;    // ข้อความสมบูรณ์เมื่อหยุดพูด
+  onError: (msg: string) => void;
+  onStart?: () => void;
+  onStop?: () => void;
 }
 
 // ── TTS ───────────────────────────────────────────────────────────────
@@ -75,61 +88,123 @@ export async function speakText(text: string, options: TTSOptions = {}): Promise
 export const stopSpeaking = () => { if (currentAudio) { currentAudio.pause(); currentAudio = null; } };
 export const isSpeaking = () => currentAudio !== null && !currentAudio.paused;
 
-// ── STT ───────────────────────────────────────────────────────────────
-
-/** ส่ง audio blob ไป ElevenLabs Scribe → ได้ text กลับมา */
-export async function transcribeAudio(audioBlob: Blob): Promise<STTResult> {
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'recording.webm');
-  formData.append('model_id', 'scribe_v1');
-
-  const res = await fetch('/api/elevenlabs/v1/speech-to-text', {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) throw new Error(`ElevenLabs STT error ${res.status}`);
-  const data = await res.json() as any;
-  return { text: data.text || '', language: data.language_code };
-}
-
-// ── VoiceRecorder ─────────────────────────────────────────────────────
+// ── Realtime STT ──────────────────────────────────────────────────────
 
 /**
- * อัดเสียงจาก microphone
+ * RealtimeSTT — WebSocket-based real-time speech-to-text
+ *
  * Usage:
- *   const rec = new VoiceRecorder()
- *   await rec.start()
- *   const blob = await rec.stop()
- *   const { text } = await transcribeAudio(blob)
+ *   const stt = new RealtimeSTT({
+ *     onPartial: (text) => setInputValue(text),         // แสดง real-time
+ *     onCommitted: (text) => setInputValue(prev => prev + ' ' + text),
+ *     onError: (msg) => setError(msg),
+ *   })
+ *   await stt.start()   // กดปุ่ม Mic
+ *   await stt.stop()    // ไม่จำเป็น — VAD หยุดเองเมื่อเงียบ
  */
-export class VoiceRecorder {
-  private mediaRecorder: MediaRecorder | null = null;
-  private chunks: Blob[] = [];
+export class RealtimeSTT {
+  private ws: WebSocket | null = null;
   private stream: MediaStream | null = null;
+  private audioContext: AudioContext | null = null;
+  private processor: ScriptProcessorNode | null = null;
+  private callbacks: RealtimeSTTCallbacks;
+  private isRunning = false;
+  private partialText = '';
+
+  constructor(callbacks: RealtimeSTTCallbacks) {
+    this.callbacks = callbacks;
+  }
 
   async start(): Promise<void> {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-    this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
-    this.chunks = [];
-    this.mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) this.chunks.push(e.data); };
-    this.mediaRecorder.start(250);
-  }
+    if (this.isRunning) return;
 
-  stop(): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      if (!this.mediaRecorder) { reject(new Error('Not recording')); return; }
-      this.mediaRecorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: 'audio/webm' });
-        this.stream?.getTracks().forEach(t => t.stop());
-        resolve(blob);
+    try {
+      // 1. ขอ single-use token จาก backend (ไม่เปิดเผย API key ใน browser)
+      const tokenRes = await fetch('/api/elevenlabs-token', { method: 'POST' });
+      if (!tokenRes.ok) throw new Error('ไม่สามารถขอ token ได้ค่ะ');
+      const { token } = await tokenRes.json();
+
+      // 2. เปิด WebSocket ไป ElevenLabs
+      const wsUrl = `${WS_URL}?model_id=${STT_MODEL_ID}&token=${token}&commit_strategy=vad&language_code=th&audio_format=pcm_16000`;
+      this.ws = new WebSocket(wsUrl);
+
+      this.ws.onopen = () => {
+        this.callbacks.onStart?.();
       };
-      this.mediaRecorder.stop();
-    });
+
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.message_type === 'partial_transcript' && msg.text) {
+            this.partialText = msg.text;
+            this.callbacks.onPartial(msg.text);
+          } else if (msg.message_type === 'committed_transcript' && msg.text) {
+            this.partialText = '';
+            this.callbacks.onCommitted(msg.text);
+          } else if (msg.message_type?.includes('error')) {
+            this.callbacks.onError(msg.message || 'ElevenLabs STT error');
+          }
+        } catch { /* ignore parse errors */ }
+      };
+
+      this.ws.onerror = () => {
+        this.callbacks.onError('เชื่อมต่อ Voice ไม่ได้ค่ะ');
+        this.stop();
+      };
+
+      this.ws.onclose = () => {
+        this.isRunning = false;
+        this.callbacks.onStop?.();
+      };
+
+      // 3. เปิด microphone + AudioContext เพื่อส่งเสียง PCM 16kHz
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = this.audioContext.createMediaStreamSource(this.stream);
+
+      // ScriptProcessorNode แปลง float32 → int16 PCM แล้วส่งผ่าน WebSocket
+      this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+      this.processor.onaudioprocess = (e) => {
+        if (this.ws?.readyState !== WebSocket.OPEN) return;
+        const float32 = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+        }
+        // ส่ง PCM chunk เป็น base64
+        const uint8 = new Uint8Array(int16.buffer);
+        let binary = '';
+        for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+        const base64 = btoa(binary);
+        this.ws.send(JSON.stringify({
+          message_type: 'input_audio_chunk',
+          audio_base_64: base64,
+          sample_rate: 16000,
+        }));
+      };
+
+      source.connect(this.processor);
+      this.processor.connect(this.audioContext.destination);
+      this.isRunning = true;
+
+    } catch (err: any) {
+      this.callbacks.onError(err.message || 'ไม่สามารถเริ่ม Voice ได้ค่ะ');
+      await this.stop();
+    }
   }
 
-  isRecording(): boolean { return this.mediaRecorder?.state === 'recording'; }
+  async stop(): Promise<void> {
+    this.isRunning = false;
+    this.processor?.disconnect();
+    this.processor = null;
+    this.stream?.getTracks().forEach(t => t.stop());
+    this.stream = null;
+    await this.audioContext?.close();
+    this.audioContext = null;
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.close();
+    this.ws = null;
+    this.partialText = '';
+  }
+
+  isActive(): boolean { return this.isRunning; }
 }
