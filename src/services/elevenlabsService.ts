@@ -159,8 +159,13 @@ export class RealtimeSTT {
 
       // 3. เปิด microphone + AudioContext
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // ใช้ sample rate ของ browser จริงๆ — ไม่บังคับ 16000 เพราะ browser อาจ ignore
-      this.audioContext = new AudioContext();
+      // รองรับ Safari รุ่นเก่าที่ใช้ webkitAudioContext
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioCtx();
+      // iPhone Safari บังคับ suspend AudioContext — ต้อง resume หลัง user gesture
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
       const actualSampleRate = this.audioContext.sampleRate; // 44100 หรือ 48000
       const source = this.audioContext.createMediaStreamSource(this.stream);
 
