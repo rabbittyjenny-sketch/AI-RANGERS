@@ -125,7 +125,7 @@ export class RealtimeSTT {
       const { token } = await tokenRes.json();
 
       // 2. เปิด WebSocket ไป ElevenLabs
-      const wsUrl = `${WS_URL}?model_id=${STT_MODEL_ID}&token=${token}&commit_strategy=vad&language_code=th&audio_format=pcm_16000`;
+      const wsUrl = `${WS_URL}?model_id=${STT_MODEL_ID}&token=${token}&commit_strategy=vad&language_code=th`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
@@ -157,12 +157,14 @@ export class RealtimeSTT {
         this.callbacks.onStop?.();
       };
 
-      // 3. เปิด microphone + AudioContext เพื่อส่งเสียง PCM 16kHz
+      // 3. เปิด microphone + AudioContext
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.audioContext = new AudioContext({ sampleRate: 16000 });
+      // ใช้ sample rate ของ browser จริงๆ — ไม่บังคับ 16000 เพราะ browser อาจ ignore
+      this.audioContext = new AudioContext();
+      const actualSampleRate = this.audioContext.sampleRate; // 44100 หรือ 48000
       const source = this.audioContext.createMediaStreamSource(this.stream);
 
-      // ScriptProcessorNode แปลง float32 → int16 PCM แล้วส่งผ่าน WebSocket
+      // ScriptProcessorNode แปลง float32 → int16 PCM
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       this.processor.onaudioprocess = (e) => {
         if (this.ws?.readyState !== WebSocket.OPEN) return;
@@ -171,15 +173,18 @@ export class RealtimeSTT {
         for (let i = 0; i < float32.length; i++) {
           int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
         }
-        // ส่ง PCM chunk เป็น base64
+        // ส่ง PCM chunk เป็น base64 — ใช้ chunk เล็กๆ ป้องกัน stack overflow
         const uint8 = new Uint8Array(int16.buffer);
         let binary = '';
-        for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+        const chunkSize = 8192;
+        for (let i = 0; i < uint8.length; i += chunkSize) {
+          binary += String.fromCharCode(...uint8.subarray(i, i + chunkSize));
+        }
         const base64 = btoa(binary);
         this.ws.send(JSON.stringify({
           message_type: 'input_audio_chunk',
           audio_base_64: base64,
-          sample_rate: 16000,
+          sample_rate: actualSampleRate, // ส่ง sample rate จริงของ browser
         }));
       };
 
