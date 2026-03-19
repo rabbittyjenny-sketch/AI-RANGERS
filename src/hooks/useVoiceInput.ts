@@ -21,6 +21,7 @@ export interface UseVoiceInputReturn {
 
 export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
   const [error, setError] = useState<string | null>(null);
+  const [localListening, setLocalListening] = useState(false);
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
   onResultRef.current = onResult;
@@ -33,6 +34,8 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
       echoCancellation: true,
       noiseSuppression: true,
     },
+    onConnect: () => setLocalListening(true),
+    onDisconnect: () => setLocalListening(false),
     onCommittedTranscript: (data) => {
       if (data.text?.trim()) {
         onResultRef.current(data.text.trim());
@@ -41,47 +44,47 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
     onError: (err) => {
       const msg = err instanceof Error ? err.message : 'Voice error';
       setError(msg);
+      setLocalListening(false);
       onErrorRef.current?.(msg);
     },
     onAuthError: (data) => {
       const msg = data.error || 'Auth error';
       setError(msg);
+      setLocalListening(false);
       onErrorRef.current?.(msg);
     },
   });
 
+  const stop = useCallback(() => {
+    scribe.disconnect();
+    setLocalListening(false);
+    setError(null);
+  }, [scribe]);
+
   const toggle = useCallback(async () => {
     setError(null);
 
-    if (scribe.isConnected) {
-      scribe.disconnect();
+    if (localListening) {
+      stop();
       return;
     }
 
     try {
-      // ขอ token จาก backend — API key ปลอดภัยอยู่ใน Vercel env
       const res = await fetch('/api/elevenlabs-token', { method: 'POST' });
       if (!res.ok) throw new Error('ขอ token ไม่ได้ค่ะ status: ' + res.status);
       const data = await res.json();
       if (!data.token) throw new Error(data.error || 'ไม่ได้รับ token ค่ะ');
-
-      // ส่ง token ผ่าน connect()
       await scribe.connect({ token: data.token });
-
     } catch (err: any) {
       const msg = err.message || 'ไม่สามารถเริ่ม Voice ได้ค่ะ';
       setError(msg);
+      setLocalListening(false);
       onErrorRef.current?.(msg);
     }
-  }, [scribe]);
-
-  const stop = useCallback(() => {
-    scribe.disconnect();
-    setError(null);
-  }, [scribe]);
+  }, [localListening, scribe, stop]);
 
   return {
-    isListening: scribe.isConnected,
+    isListening: localListening,
     isTranscribing: scribe.isTranscribing,
     partialText: scribe.partialTranscript || '',
     toggle,
