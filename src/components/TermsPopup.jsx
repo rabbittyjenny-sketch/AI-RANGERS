@@ -174,13 +174,14 @@ const TermsPopup = ({ onAccept }) => {
           <button
             onClick={handleAccept}
             disabled={!checked}
-            style={{
-              width: '100%', padding: '12px', borderRadius: 16, border: 'none',
-              cursor: checked ? 'pointer' : 'not-allowed',
-              fontWeight: 700, fontSize: '0.9rem', color: '#fff',
-              transition: 'all 0.2s',
-              background: checked
-                ? 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)'
+            
+          style={{
+            width: '100%', padding: '12px', borderRadius: 16, border: 'none',
+            cursor: checked ? 'pointer' : 'not-allowed',
+            fontWeight: 700, fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            background: checked
+                          ? 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)'
                 : '#e2e8f0',
               color: checked ? '#fff' : '#94a3b8',
               boxShadow: checked ? '3px 3px 10px rgba(94,155,235,0.35)' : 'none',
