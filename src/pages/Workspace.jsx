@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import TermsPopup from '../components/TermsPopup';
 import {
     Send, Paperclip, Mic, X, AlertCircle, BookOpen, Check,
     Trash2, LogOut, User, FileText, Copy, Download,
