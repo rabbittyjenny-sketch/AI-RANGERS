@@ -267,7 +267,7 @@ class AIService {
     messages: Array<{ role: 'user' | 'assistant'; content: any }>,
     contextMsg?: string
   ): Promise<string> {
-    const model = (import.meta as any).env?.VITE_CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
+    const model = (import.meta as any).env?.VITE_CLAUDE_MODEL || 'claude-sonnet-4-6';
 
     const userApiKey = ((import.meta as any).env?.VITE_ANTHROPIC_API_KEY as string | undefined)
       || (typeof localStorage !== 'undefined' ? localStorage.getItem('socialFactory_anthropicKey') : null);
