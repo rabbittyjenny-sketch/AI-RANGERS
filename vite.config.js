@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     // ANTHROPIC_API_KEY and ELEVENLABS_API_KEY are intentionally NOT exposed —
     // they are injected by the server-side proxy below.
     define: {
-      'process.env.CLAUDE_MODEL': JSON.stringify(env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001'),
+      'process.env.CLAUDE_MODEL': JSON.stringify(env.CLAUDE_MODEL || 'claude-sonnet-4-20250514'),
       'process.env.DATABASE_URL': JSON.stringify(env.DATABASE_URL || ''),
     },
 
