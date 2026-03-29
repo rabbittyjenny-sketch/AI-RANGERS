@@ -530,7 +530,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     const [showBrandModal, setShowBrandModal] = useState(false);
     /* Panel 3 sections */
     const [p3Tab, setP3Tab] = useState('files'); // 'files' | 'brand'
-
+const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_accepted'));
     /* ─── Mobile detection ─── */
     const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
     const [mobileRightOpen, setMobileRightOpen] = useState(false);
@@ -741,6 +741,7 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     return (
         <>
             <FontLoader />
+        {showTerms && <TermsPopup onAccept={() => setShowTerms(false)} />}
             <style>{`
         @keyframes rangerpulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.55;transform:scale(1.2)} }
         @keyframes typingdot   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
