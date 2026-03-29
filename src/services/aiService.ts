@@ -309,7 +309,8 @@ class AIService {
       }
 
       const data = await res.json() as any;
-      return data.content?.find((b: any) => b.type === 'text')?.text || 'ไม่ได้รับคำตอบ';
+      const textBlocks = data.content?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') || '';
+      return textBlocks || 'ไม่ได้รับคำตอบ';
     } finally {
       clearTimeout(timeout);
     }
