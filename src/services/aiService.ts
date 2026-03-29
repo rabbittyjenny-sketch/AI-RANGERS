@@ -197,6 +197,8 @@ class AIService {
     msg += `\n3. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
     msg += `\n4. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
     msg += `\n5. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
+    msg += `\n6. ถ้าค้นหาข้อมูลจากอินเทอร์เน็ต ให้แนบแหล่งที่มาสั้นๆ ท้ายคำตอบ เช่น *ที่มา: Hootsuite 2025* — ไม่ต้องแนบลิงก์`;
+    msg += `\n7. ใช้ web search เมื่อข้อมูลอาจเปลี่ยนแปลงตามเวลาเท่านั้น ไม่จำเป็นต้องค้นทุกคำถาม`;
 
     return msg;
   }
@@ -296,6 +298,7 @@ class AIService {
             ? `${agent.systemPrompt}\n\n---\n${contextMsg}`
             : agent.systemPrompt,
           messages,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         }),
         signal: controller.signal,
       });
