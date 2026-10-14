@@ -13,7 +13,7 @@
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
-import { withKnowledge } from '../data/rangerKnowledge';
+import { withSkills } from '../data/rangerSkills';
 import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
 import { getDeviceId } from './deviceId';
@@ -23,11 +23,13 @@ const RANGER_TO_AGENT: Record<string, string> = {
   'brand':     'brand-builder',
   'content':   'content-creator',
   'planning':  'campaign-planner',
+  'bizplan':   'business-planner',
   'marketing': 'market-insight',
   'consult':   'advisor',
   'brand-builder':    'brand-builder',
   'content-creator':  'content-creator',
   'campaign-planner': 'campaign-planner',
+  'business-planner': 'business-planner',
   'market-insight':   'market-insight',
   'advisor':          'advisor',
 };
@@ -182,8 +184,9 @@ class AIService {
     // ── build context + messages ───────────────────────────────────────────
     // ข้อมูลแบรนด์อยู่ใน system prompt ที่เดียว (เดิมส่งซ้ำในข้อความแรกด้วย)
     const contextMsg = this.buildContextMessage(agent, ctx);
-    const system = `${withKnowledge(agentId, agent.systemPrompt)}\n\n---\n${contextMsg}`;
-    const messages = this.buildMessages(text, history, attachments);
+    // system prompt คงที่ทุกข้อความ (cache ได้) — ความรู้เฉพาะทางแนบกับข้อความผู้ใช้เฉพาะเมื่อคำถามตรงกับ skill
+    const system = `${agent.systemPrompt}\n\n---\n${contextMsg}`;
+    const messages = this.buildMessages(withSkills(agentId, text), history, attachments);
 
     // ── Gate 1: validate input ─────────────────────────────────────────────
     const inputValidation = orchestratorEngine.validate(agentId, text);

@@ -15,6 +15,11 @@ export const agentResponsibilities = {
     canHandoff: ['campaign-planner'],
     phase: 1,
   },
+  'business-planner': {
+    owns: ['business plan 11 องค์ประกอบ', 'SWOT เบื้องต้น', 'เป้าหมาย SMART', 'แผนการเงินและจุดคุ้มทุน', 'แผนรองรับความเสี่ยง'],
+    canHandoff: ['campaign-planner', 'market-insight', 'brand-builder'],
+    phase: 1,
+  },
   'campaign-planner': {
     owns: ['campaign timeline', 'post calendar', 'promotion schedule', 'channel mix'],
     canHandoff: ['content-creator', 'market-insight'],
@@ -27,7 +32,7 @@ export const agentResponsibilities = {
   },
   'advisor': {
     owns: ['general Q&A', 'concept explanation', 'routing', 'onboarding'],
-    canHandoff: ['brand-builder', 'content-creator', 'campaign-planner', 'market-insight'],
+    canHandoff: ['brand-builder', 'content-creator', 'campaign-planner', 'business-planner', 'market-insight'],
     phase: 1,
   },
 } as const;

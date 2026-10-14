@@ -44,7 +44,7 @@ const RANGERS = [
     { id: 'planning', name: 'น้องแพลน', nameEn: 'Planning Ranger', img: 'https://ik.imagekit.io/ideas365logo/planning.png', color: '#EAB308', description: 'วางแผนโปรเจกต์และตารางงาน', keywords: ['plan', 'schedule', 'roadmap'] }, // 3. เหลือง
     { id: 'marketing', name: 'น้องดูตลาด', nameEn: 'Marketing Ranger', img: 'https://ik.imagekit.io/ideas365logo/marketing.png', color: '#EF4444', description: 'วิเคราะห์ตลาด คู่แข่ง เทรนด์', keywords: ['market', 'research', 'trend'] }, // 4. แดง
     { id: 'consult', name: 'น้องที่ปรึกษา', nameEn: 'Consultant Ranger', img: 'https://ik.imagekit.io/ideas365logo/consult.png', color: '#F97316', description: 'ให้คำปรึกษาธุรกิจและกลยุทธ์', keywords: ['consult', 'advice', 'strategy'] }, // 5. ส้ม
-    { id: 'what', name: 'น้องงง', nameEn: 'WHAT?!', img: 'https://ik.imagekit.io/ideas365logo/what.png', color: '#EC4899', description: 'Coming Soon…', keywords: [], comingSoon: true }, // 6. ชมพู
+    { id: 'bizplan', name: 'น้องแผนธุรกิจ', nameEn: 'Business Planner', img: 'https://ik.imagekit.io/ideas365logo/what.png', color: '#EC4899', description: 'วางแผนธุรกิจภาพรวม 11 องค์ประกอบ', keywords: ['business plan', 'แผนธุรกิจ'] }, // 6. ชมพู (เดิมน้องงง)
 ];
 
 /* ═══════════════════════════════════════════════════
@@ -1267,20 +1267,6 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                             <FileText size={16} color={mobileRightOpen ? '#5E9BEB' : '#94a3b8'} />
                         </div>
                         <span className="mobile-tab-label" style={{ color: mobileRightOpen ? '#5E9BEB' : '#94a3b8' }}>ไฟล์/แบรนด์</span>
-                    </button>
-                    {/* Coming Soon */}
-                    <button
-                        className="mobile-tab-btn"
-                        onClick={() => setShowComingSoon(true)}
-                        style={{ opacity: 0.5 }}
-                    >
-                        <img
-                            src={RANGERS.find(r => r.comingSoon)?.img}
-                            alt="Coming Soon"
-                            className="mobile-tab-ranger-img"
-                            onError={e => { e.target.style.display = 'none'; }}
-                        />
-                        <span className="mobile-tab-label">งง?</span>
                     </button>
                 </nav>
             )}

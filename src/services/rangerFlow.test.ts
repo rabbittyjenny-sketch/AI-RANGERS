@@ -6,7 +6,7 @@ vi.mock('./databaseService', () => ({
 
 import { aiService } from './aiService';
 import { GUARD_BADGE_MARKER } from './orchestratorEngine';
-import { RANGER_KNOWLEDGE } from '../data/rangerKnowledge';
+import { RANGER_SKILLS } from '../data/rangerSkills';
 import { getAllAgents, getAgentById } from '../data/agents';
 
 /**
@@ -20,6 +20,7 @@ const UI_RANGERS: Array<{ uiId: string; agentId: string; name: string }> = [
   { uiId: 'brand', agentId: 'brand-builder', name: 'น้องแบรนด์' },
   { uiId: 'content', agentId: 'content-creator', name: 'น้องคอนเทนต์' },
   { uiId: 'planning', agentId: 'campaign-planner', name: 'น้องแพลน' },
+  { uiId: 'bizplan', agentId: 'business-planner', name: 'น้องแผนธุรกิจ' },
   { uiId: 'marketing', agentId: 'market-insight', name: 'น้องดูตลาด' },
   { uiId: 'consult', agentId: 'advisor', name: 'น้องที่ปรึกษา' },
 ];
@@ -70,22 +71,42 @@ afterEach(() => {
 });
 
 describe('the Ranger the user picks is the one that answers', () => {
-  it('covers every real agent exactly once', () => {
+  it('covers every real agent exactly once (6 Rangers)', () => {
     expect(UI_RANGERS.map(r => r.agentId).sort()).toEqual(getAllAgents().map(a => a.id).sort());
   });
 
-  it.each(UI_RANGERS)('$uiId → $name: own prompt + own knowledge pack, nobody else\'s', async ({ uiId, agentId, name }) => {
+  it.each(UI_RANGERS)('$uiId → $name: its own prompt and brand context only', async ({ uiId, agentId, name }) => {
     const f = installFetch();
     await aiService.sendMessage(uiId, 'ช่วยหน่อย', [], brandCtx as any);
 
     const [{ system }] = calls(f, '/api/anthropic');
     expect(system).toContain(getAgentById(agentId)!.systemPrompt);
     expect(system).toContain(`## คำสั่งสำหรับ ${name}`);
-    expect(system).toContain(RANGER_KNOWLEDGE[agentId]);
     expect(system).toContain('ร้านกาแฟดี');
     for (const other of UI_RANGERS.filter(r => r.agentId !== agentId)) {
-      expect(system, `${name} got ${other.name}'s knowledge`).not.toContain(RANGER_KNOWLEDGE[other.agentId]);
+      expect(system, `${name} got ${other.name}'s instructions`).not.toContain(`## คำสั่งสำหรับ ${other.name}`);
     }
+  });
+
+  it('keeps the system prompt identical across questions, so it stays cacheable, and puts a matching skill in the user turn only', async () => {
+    const f = installFetch();
+    await aiService.sendMessage('content', 'ช่วยเขียนแคปชันกาแฟหน่อย', [], brandCtx as any);
+    await aiService.sendMessage('content', 'อยากทำไลฟ์ขายกาแฟ ต้องเตรียมอะไร', [], brandCtx as any);
+    const [plain, live] = calls(f, '/api/anthropic');
+    expect(live.system).toBe(plain.system);
+    const skillTitle = RANGER_SKILLS.find(s => s.id === 'tiktok-live')!.title;
+    expect(live.system).not.toContain(skillTitle);
+    // ไม่ตรง skill = ข้อความผู้ใช้เดิมเป๊ะ; ตรง = ต่อท้ายด้วยความรู้ และยังเป็นข้อความเดียว (เครดิตไม่ถูกนับเป็นไฟล์แนบ)
+    expect(plain.messages).toEqual([{ role: 'user', content: 'ช่วยเขียนแคปชันกาแฟหน่อย' }]);
+    expect(typeof live.messages[0].content).toBe('string');
+    expect(live.messages[0].content.startsWith('อยากทำไลฟ์ขายกาแฟ ต้องเตรียมอะไร\n\n---\n')).toBe(true);
+    expect(live.messages[0].content).toContain(skillTitle);
+  });
+
+  it('does not hand one Ranger the skills of another', async () => {
+    const f = installFetch();
+    await aiService.sendMessage('brand', 'ทำไลฟ์ tiktok live ยังไง', [], brandCtx as any);
+    expect(calls(f, '/api/anthropic')[0].messages).toEqual([{ role: 'user', content: 'ทำไลฟ์ tiktok live ยังไง' }]);
   });
 
   it('accepts the long agent ids too', async () => {

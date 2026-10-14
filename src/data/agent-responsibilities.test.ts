@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { agentResponsibilities } from './agent-responsibilities';
 import { getAllAgents } from './agents';
 
-const RANGER_IDS = ['brand-builder', 'content-creator', 'campaign-planner', 'market-insight', 'advisor'];
+const RANGER_IDS = ['brand-builder', 'content-creator', 'campaign-planner', 'business-planner', 'market-insight', 'advisor'];
 
-describe('agentResponsibilities (5 independent Rangers)', () => {
-  it('covers exactly the 5 Rangers defined in agents.ts', () => {
+describe('agentResponsibilities (6 independent Rangers)', () => {
+  it('covers exactly the 6 Rangers defined in agents.ts', () => {
     expect(Object.keys(agentResponsibilities).sort()).toEqual([...RANGER_IDS].sort());
     expect(getAllAgents().map(a => a.id).sort()).toEqual([...RANGER_IDS].sort());
   });

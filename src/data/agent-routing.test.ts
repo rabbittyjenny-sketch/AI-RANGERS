@@ -7,14 +7,16 @@ import { getAllAgents, findBestAgentForInput } from './agents';
  * และ aiService ส่งข้อความตรงไปหาน้องที่เลือก ไม่ผ่าน routeToAgent
  * เทสต์นี้กันไม่ให้ตัวช่วยนี้เพี้ยนถ้าจะนำกลับมาใช้ (เช่น แนะนำน้องที่เหมาะสม)
  */
-describe('routeToAgent (5 Rangers)', () => {
+describe('routeToAgent (6 Rangers)', () => {
   const cases: Array<[string, string]> = [
     ['ช่วยตั้งชื่อแบรนด์ให้หน่อย', 'brand-builder'],
     ['โลโก้และสีแบรนด์', 'brand-builder'],
     ['เขียนแคปชั่น instagram ให้หน่อย', 'content-creator'],
     ['โพสต์ facebook', 'content-creator'],
     ['วางแผนแคมเปญวันที่ 11.11', 'campaign-planner'],
-    ['ช่วยทำ business plan', 'campaign-planner'],
+    ['อยากทำแผนธุรกิจ SWOT', 'business-planner'],
+    ['แผนการเงินและจุดคุ้มทุน', 'business-planner'],
+    ['ทำปฏิทินโพสต์เดือนหน้า', 'campaign-planner'],
     ['วิเคราะห์คู่แข่งและตลาด', 'market-insight'],
   ];
 
