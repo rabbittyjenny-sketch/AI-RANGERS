@@ -141,9 +141,7 @@ export const AgentChat = ({ agentId, onBack, masterContext, initialMessages, onM
       const brandId = masterContext.brandId;
       // Fetch history for any brandId (now supporting string/guest IDs)
 
-      const history = await databaseService.getConversationHistory(
-        parseInt(String(brandId)), 20
-      );
+      const history = await databaseService.getConversationHistory(String(brandId), 20);
 
       if (history && history.length > 0) {
         const historyMessages = history.map((msg, idx) => ({

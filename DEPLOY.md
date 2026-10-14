@@ -11,7 +11,7 @@ npm run db:push
 ### 2. ตรวจสอบ .env
 ```
 ANTHROPIC_API_KEY=sk-ant-...     ← ต้องมี
-VITE_DATABASE_URL=postgresql://... ← ต้องมี
+DATABASE_URL=postgresql://...     ← ต้องมี (server-side เท่านั้น)
 ELEVENLABS_API_KEY=sk_...         ← optional
 ```
 
@@ -26,7 +26,7 @@ vercel
 | Variable | Value | Note |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | server-side เท่านั้น |
-| `VITE_DATABASE_URL` | `postgresql://...` | browser + server |
+| `DATABASE_URL` | `postgresql://...` | server-side เท่านั้น (เดิมชื่อ `VITE_DATABASE_URL` — ยังอ่านได้ แต่ให้เปลี่ยนชื่อ) |
 | `ELEVENLABS_API_KEY` | `sk_...` | optional |
 | `CLAUDE_MODEL` | `claude-haiku-5-5` | optional — โมเดลแชท (default Haiku 5.5) |
 | `CLAUDE_EFFORT` | `low` | optional — low / medium / high / none |
@@ -42,9 +42,15 @@ vercel
 **ห้ามตั้ง** `VITE_ANTHROPIC_API_KEY` หรือ `VITE_CLAUDE_MODEL` — โค้ดเลิกใช้แล้ว และตัวแปร `VITE_` ถูกฝังลง browser
 model / max_tokens / web search ถูกกำหนดฝั่ง server เท่านั้น (api/anthropic.js) browser เปลี่ยนไม่ได้
 
+### ฐานข้อมูลและความเป็นเจ้าของแบรนด์
+- browser ไม่ต่อฐานข้อมูลตรงแล้ว — อ่าน/เขียนผ่าน `/api/brands`, `/api/messages`
+- แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (คอลัมน์ `owner_key`, `client_id` — function เพิ่มให้เองครั้งแรก)
+- แบรนด์เก่าที่บันทึกก่อนมีระบบเจ้าของ จะไม่แสดงให้ใครเห็น (ข้อมูลยังอยู่ ไม่ได้ลบ)
+- **หลังย้ายเสร็จ ให้เปลี่ยนรหัสผ่าน Neon** เพราะ connection string เดิมเคยอยู่ในไฟล์ที่ browser โหลด
+
 ### ระบบเครดิต
 เก็บยอดใน Neon (ตาราง `ranger_credit_usage`, `ranger_credit_turns`) — function สร้างตารางเองครั้งแรก
-ถ้าไม่มี `DATABASE_URL`/`VITE_DATABASE_URL` จะนับในหน่วยความจำแทน (แม่นน้อยกว่า ดู log `[credits]`)
+ถ้าไม่มี `DATABASE_URL` จะนับในหน่วยความจำแทน (แม่นน้อยกว่า ดู log `[credits]`)
 
 ### ตั้งวงเงินใน Claude Console (ทำก่อนเปิดสาธารณะ)
 ใน Claude Console (หน้า Limits ของ workspace) ตั้ง spend limit — ตัวกันสุดท้ายถ้ามีคนใช้งานผิดปกติ

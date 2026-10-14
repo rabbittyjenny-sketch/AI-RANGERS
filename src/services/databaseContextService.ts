@@ -19,7 +19,7 @@ import { databaseService, BrandRecord, AgentLearningRecord } from './databaseSer
 
 export interface StrategistContext {
   // Bucket 1: Market & Business
-  brandId?: number;
+  brandId?: number | string;
   coreUSP?: string[];
   businessModel?: string;
   competitors?: string[];
@@ -31,7 +31,7 @@ export interface StrategistContext {
 
 export interface CreativeContext {
   // Bucket 2: Visual Identity
-  brandId?: number;
+  brandId?: number | string;
   primaryColor?: string;
   secondaryColors?: string[];
   fontFamily?: string[];
@@ -46,7 +46,7 @@ export interface CreativeContext {
 
 export interface AgencyContext {
   // Bucket 3: Communication & Sales
-  brandId?: number;
+  brandId?: number | string;
   toneOfVoice?: string;
   targetAudience?: string;
   targetPersona?: string;
@@ -65,7 +65,7 @@ export interface CompleteAgentContext {
   creative?: CreativeContext;
   agency?: AgencyContext;
   timestamp: string;
-  brandId?: number;
+  brandId?: number | string;
 }
 
 class DatabaseContextService {
@@ -141,7 +141,7 @@ class DatabaseContextService {
     // Check cache
     if (this.brandCache.has(identifier)) {
       const cached = this.brandCache.get(identifier);
-      if (cached !== null) {
+      if (cached) {
         return cached;
       }
     }

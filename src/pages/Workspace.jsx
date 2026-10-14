@@ -337,6 +337,7 @@ const BrandPopupModal = ({ brands, activeBrandIdx, onSave, onClose }) => {
             if (!b.name) return;
             const ind = b.industry === 'other' ? (b.industryOther || 'other') : (b.industry || 'other');
             databaseService.saveBrand({
+                id: String(b.id),
                 brandNameTh: b.name,
                 brandNameEn: b.nameEn || b.name,
                 industry: ind,
@@ -639,7 +640,7 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                     const already = merged.find(b => b.name === db.brandNameTh || String(b.id) === String(db.id));
                     if (!already && merged.length < 3) {
                         merged.push({
-                            id: db.id || Date.now(),
+                            id: db.id ?? Date.now(),
                             name: db.brandNameTh || '',
                             nameEn: db.brandNameEn || '',
                             industry: db.industry || '',

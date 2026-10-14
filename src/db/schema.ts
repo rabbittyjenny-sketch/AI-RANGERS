@@ -35,6 +35,11 @@ export const brands = pgTable('brands', {
   automationEmail: varchar('automation_email', { length: 255 }), // Email for notifications
   automationLineOa: varchar('automation_line_oa', { length: 255 }), // LINE OA ID for notifications
 
+  // === OWNERSHIP (api/_lib/db.js) ===
+  // รหัสเครื่องของเจ้าของ + รหัสแบรนด์ฝั่ง browser — แบรนด์เก่าที่ไม่มีเจ้าของจะไม่แสดงให้ใคร
+  ownerKey: text('owner_key'),
+  clientId: text('client_id'),
+
   // === METADATA ===
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

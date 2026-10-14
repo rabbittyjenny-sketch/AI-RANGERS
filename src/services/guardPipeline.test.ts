@@ -135,7 +135,7 @@ describe('orchestratorEngine.processAndDeliver', () => {
     agentName: 'Content',
     userInput: 'เขียนโพสต์',
     context: brandCtx as any,
-    brandIdNum: 0,
+    brandKey: '',
     messages: [{ role: 'user' as const, content: 'เขียนโพสต์' }],
   };
 

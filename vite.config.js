@@ -11,6 +11,8 @@ function localApiFunctions(env) {
     '/api/anthropic': './api/anthropic.js',
     '/api/guard': './api/guard.js',
     '/api/credits': './api/credits.js',
+    '/api/brands': './api/brands.js',
+    '/api/messages': './api/messages.js',
   }
   return {
     name: 'local-api-functions',
@@ -52,9 +54,6 @@ export default defineConfig(({ mode }) => {
     // Expose only safe VITE_ prefixed vars to the browser bundle
     // ANTHROPIC_API_KEY and ELEVENLABS_API_KEY are intentionally NOT exposed —
     // they are injected by the server-side proxy below.
-    define: {
-      'process.env.DATABASE_URL': JSON.stringify(env.DATABASE_URL || ''),
-    },
 
     server: {
       port: 3000,

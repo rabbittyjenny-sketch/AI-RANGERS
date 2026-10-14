@@ -15,6 +15,7 @@ import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
+import { getDeviceId } from './deviceId';
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
 const RANGER_TO_AGENT: Record<string, string> = {
@@ -73,19 +74,7 @@ export class ClaudeApiError extends Error {
   }
 }
 
-/** รหัสเครื่อง (สุ่มครั้งแรกแล้วเก็บใน browser) — ใช้นับเครดิตรายวันต่อผู้ใช้ */
-export function getDeviceId(): string | null {
-  try {
-    let id = localStorage.getItem('ranger_uid');
-    if (!id && typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      id = crypto.randomUUID();
-      localStorage.setItem('ranger_uid', id);
-    }
-    return id;
-  } catch {
-    return null;
-  }
-}
+export { getDeviceId };
 
 function apiHeaders(json = true): Record<string, string> {
   const h: Record<string, string> = {};
@@ -154,12 +143,13 @@ class AIService {
     const agent = getAgentById(agentId);
     if (!agent) throw new Error(`ไม่พบ Ranger: ${rangerId}`);
 
-    const brandIdNum = parseInt(String(ctx.brandId)) || 0;
+    // รหัสแบรนด์ฝั่ง browser — server ตรวจว่าเป็นแบรนด์ของเครื่องนี้ก่อนบันทึก
+    const brandKey = ctx.brandId && String(ctx.brandId) !== 'guest' ? String(ctx.brandId) : '';
 
     // ── บันทึก user message ────────────────────────────────────────────────
-    if (brandIdNum > 0) {
+    if (brandKey) {
       const userMsg: MessageRecord = {
-        brandId: brandIdNum,
+        brandId: brandKey,
         role: 'user',
         agentId,
         agentName: agent.name,
@@ -215,7 +205,7 @@ class AIService {
       userInput: text,
       rawResponse,
       context: ctx,
-      brandIdNum,
+      brandKey,
       messages,
       originalContent: this.collectOriginalContent(text, attachments),
       // รอบที่ Guard สั่งแก้ ส่ง turnId เดิม — server ไม่หักเครดิต
