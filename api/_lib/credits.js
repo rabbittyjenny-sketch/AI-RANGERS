@@ -22,6 +22,8 @@ import { getQuery } from './db.js';
 export function creditConfig() {
   return {
     dailyCredits: envInt('DAILY_CREDITS', 30),
+    // ค้นเว็บจริง = ต้นทุนสูงกว่าข้อความปกติหลายเท่า (ค่าค้น + ผลค้นที่ Claude ต้องอ่าน) จึงหักเพิ่มตามต้นทุน
+    searchExtra: envInt('SEARCH_EXTRA_CREDITS', 2),
     dailyUserCap: envInt('DAILY_USER_CAP', 20),
     ipDailyUserLimit: envInt('IP_DAILY_USER_LIMIT', 5),
     retriesPerTurn: 2,

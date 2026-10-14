@@ -216,6 +216,30 @@ describe('daily credits on /api/anthropic', () => {
     expect(r2.body.credits).toMatchObject({ cost: 2, used: 3, remaining: 27 });
   });
 
+  it('charges +2 only when Claude really searched the web, never below zero', async () => {
+    const searched = { content: [{ type: 'text', text: 'ตอบ' }], stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 1 } } };
+    create.mockResolvedValue(ok);
+    expect((await send(okBody)).body.credits).toMatchObject({ cost: 1, used: 1 }); // ไม่ค้น = 1
+    create.mockResolvedValue(searched);
+    expect((await send(okBody)).body.credits).toMatchObject({ cost: 3, used: 4, remaining: 26 }); // ค้น = 1 + 2
+    // โควตา 6 ใช้ไปแล้ว 4: ข้อความนี้ 1 + ค้นเพิ่มได้แค่ 1 ที่เหลือ (ไม่ใช่ 2) ไม่เกินโควตา
+    process.env.DAILY_CREDITS = '6';
+    const r = await send(okBody);
+    expect(r.body.credits).toMatchObject({ cost: 2, used: 6, remaining: 0, limit: 6 });
+    // เต็มแล้ว: ไม่หักเพิ่มอีก
+    process.env.DAILY_CREDITS = '7';
+    expect((await send(okBody)).body.credits).toMatchObject({ cost: 1, used: 7, remaining: 0 });
+  });
+
+  it('does not charge the extra for a search when the answer is refunded', async () => {
+    create.mockResolvedValueOnce({ content: [], stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 1 } } });
+    const r = await send(okBody);
+    expect(r.body.credits).toBeNull();
+    const bal = mockRes();
+    await creditsHandler(mockReq(undefined, { 'x-ranger-user': UID }, 'GET'), bal);
+    expect(bal.body.used).toBe(0);
+  });
+
   it('does not charge guard retries that carry a valid turnId, and rejects made-up ones', async () => {
     create.mockResolvedValue(ok);
     const first = await send(okBody);

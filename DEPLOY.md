@@ -30,7 +30,8 @@ vercel
 | `ELEVENLABS_API_KEY` | `sk_...` | optional |
 | `CLAUDE_MODEL` | `claude-sonnet-4-6` | optional — โมเดลแชท (default Sonnet 4.6 — Haiku ตอบคุณภาพไม่พอ) |
 | `CLAUDE_EFFORT` | `none` | optional — low / medium / high / none (none = ไม่ส่ง) |
-| `WEB_SEARCH_MAX_USES` | `0` | optional — ค่าเริ่มต้นปิด web search |
+| `WEB_SEARCH_MAX_USES` | `2` | optional — ค้นเว็บได้กี่ครั้งต่อข้อความ (0 = ปิด) แนบที่มาจริงท้ายคำตอบ |
+| `SEARCH_EXTRA_CREDITS` | `2` | optional — เครดิตที่หักเพิ่มเมื่อข้อความนั้นค้นเว็บจริง |
 | `CHAT_RATE_LIMIT` | `40` | optional — ข้อความต่อ IP ต่อชั่วโมง |
 | `GUARD_AI_ENABLED` | `true` | optional — `false` ปิดตัวตรวจ AI ทันที |
 | `DAILY_CREDITS` | `30` | optional — เครดิตต่อคนต่อวัน (รีเซ็ตเที่ยงคืนเวลาไทย) |

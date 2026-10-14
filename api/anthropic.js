@@ -220,6 +220,19 @@ export default async function handler(req, res) {
       await store.refund({ userKey, cost: charged, day });
       credits = null;
     }
+    // ค้นเว็บจริงในข้อความนี้ → หักเพิ่มตามต้นทุนจริง (เท่าที่เหลือ ไม่ติดลบ)
+    if (store && charged && credits && usage.web_search_requests > 0 && cfg.searchExtra > 0) {
+      const extra = Math.min(cfg.searchExtra, Math.max(cfg.dailyCredits - credits.used, 0));
+      if (extra > 0) {
+        const r = await store.reserve({ userKey, ip, cost: extra, day, cfg });
+        if (r.ok) {
+          charged += extra;
+          credits = { ...credits, cost: charged, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0) };
+        }
+      }
+    }
+    // ตัวเลขใช้จริงต่อข้อความ (ไม่มีเนื้อหา/ตัวตนผู้ใช้) — ไว้ตรวจต้นทุนจาก Vercel logs
+    console.info('[api/anthropic] usage', JSON.stringify({ model: response.model, ...usage, credits: credits?.cost ?? 0, retry: !!retryTurnId }));
     const turnId = credits ? await store.openTurn({ userKey, day }) : undefined;
 
     return res.status(200).json({
