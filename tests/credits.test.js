@@ -11,7 +11,7 @@ import {
   withFallback,
 } from '../api/_lib/credits.js';
 
-const cfg = { dailyCredits: 30, dailyUserCap: 20, ipDailyUserLimit: 5, retriesPerTurn: 2, enabled: true };
+const cfg = { dailyCredits: 30, dailyFiles: 3, dailyUserCap: 20, ipDailyUserLimit: 5, retriesPerTurn: 2, enabled: true };
 const DAY = '2026-10-14';
 
 describe('credit helpers', () => {
@@ -47,13 +47,27 @@ function storeContract(makeStore) {
     expect(r1).toMatchObject({ ok: true, used: 30 });
     const r2 = await store.reserve({ userKey, ip: '1.1.1.1', cost: 1, day: DAY, cfg });
     expect(r2).toMatchObject({ ok: false, reason: 'quota_exceeded', used: 30 });
-    expect(await store.peek({ userKey, day: DAY, cfg })).toEqual({ used: 30, remaining: 0 });
+    expect(await store.peek({ userKey, day: DAY, cfg })).toMatchObject({ used: 30, remaining: 0 });
   });
 
   it('refunds, and a new day starts from zero', async () => {
     await store.refund({ userKey: 'u:a', cost: 2, day: DAY });
     expect((await store.peek({ userKey: 'u:a', day: DAY, cfg })).used).toBe(28);
     expect((await store.peek({ userKey: 'u:a', day: '2026-10-15', cfg })).used).toBe(0);
+  });
+
+  it('limits files per day atomically, reports file_limit, and refunds files', async () => {
+    const day = '2026-11-15';
+    const a = { userKey: 'u:files', ip: '4.4.4.4', day, cfg };
+    expect(await store.reserve({ ...a, cost: 2, files: 2 })).toMatchObject({ ok: true, used: 2, files: 2 });
+    expect(await store.reserve({ ...a, cost: 2, files: 2 })).toMatchObject({ ok: false, reason: 'file_limit', used: 2, files: 2 });
+    expect(await store.reserve({ ...a, cost: 1, files: 1 })).toMatchObject({ ok: true, files: 3 });
+    expect(await store.reserve({ ...a, cost: 1, files: 0 })).toMatchObject({ ok: true, used: 4, files: 3 }); // ไม่แนบไฟล์ยังได้
+    await store.refund({ userKey: 'u:files', cost: 2, files: 2, day });
+    expect(await store.peek({ userKey: 'u:files', day, cfg })).toMatchObject({ used: 2, files: 1 });
+    // ส่งพร้อมกัน 10 ข้อความที่แนบไฟล์ — ผ่านได้ไม่เกินโควตา
+    const race = await Promise.all(Array.from({ length: 10 }, () => store.reserve({ ...a, userKey: 'u:race-files', cost: 1, files: 1 })));
+    expect(race.filter(r => r.ok)).toHaveLength(3);
   });
 
   it('limits new users per IP and per day', async () => {

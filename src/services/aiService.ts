@@ -5,7 +5,7 @@
  * 1. buildContextMessage() — inject ข้อมูล brand ครบทุกฟิลด์
  * 2. callClaudeAPI() — call /api/anthropic เท่านั้น (model/max_tokens กำหนดฝั่ง server)
  * 3. ส่งต่อ orchestratorEngine.processAndDeliver() ทำงานต่อทั้งหมด
- *    (Guard loop, saveMessage, extractOutputs, badge)
+ *    (Guard loop, extractOutputs, badge) — ไม่เก็บประวัติแชท (มีแค่ log ว่าใช้น้องตัวไหนที่ฝั่ง server)
  * 4. ถ้า Claude ตอบไม่ได้ → แจ้ง error ตามสาเหตุจริง ไม่ผ่าน Guard และไม่ติดป้ายผลตรวจ
  *
  * ไม่มี Guard logic ใน aiService อีกต่อไป
@@ -13,8 +13,9 @@
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
+import { withSkills } from '../data/rangerSkills';
+import { STANDARD_RULES } from '../data/standardRules';
 import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
-import { databaseService, MessageRecord } from './databaseService';
 import { getDeviceId } from './deviceId';
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
@@ -22,11 +23,13 @@ const RANGER_TO_AGENT: Record<string, string> = {
   'brand':     'brand-builder',
   'content':   'content-creator',
   'planning':  'campaign-planner',
+  'bizplan':   'business-planner',
   'marketing': 'market-insight',
   'consult':   'advisor',
   'brand-builder':    'brand-builder',
   'content-creator':  'content-creator',
   'campaign-planner': 'campaign-planner',
+  'business-planner': 'business-planner',
   'market-insight':   'market-insight',
   'advisor':          'advisor',
 };
@@ -38,6 +41,9 @@ export interface CreditInfo {
   remaining: number;
   limit: number;
   resetsAt: string;
+  /** ไฟล์แนบที่ใช้ไปวันนี้ / เพดานต่อวัน (0 = ไม่จำกัด) */
+  filesUsed?: number;
+  filesLimit?: number;
 }
 
 export interface SendMessageResponse {
@@ -47,6 +53,8 @@ export interface SendMessageResponse {
   confidence?: number;
   /** false เมื่อ Claude ตอบไม่ได้ (text เป็นข้อความแจ้ง error) */
   ok: boolean;
+  /** รหัสสาเหตุเมื่อ ok = false เช่น quota_exceeded, daily_user_cap, ip_user_limit, file_limit */
+  errorCode?: string;
   factCheckResult?: { valid: boolean; violations: string[]; warnings: string[] };
   outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
 }
@@ -97,6 +105,19 @@ export async function fetchCreditBalance(): Promise<(Omit<CreditInfo, 'cost'> & 
 
 const API_ERROR_PREFIX = '⚠️ ยังตอบไม่ได้ในขณะนี้';
 
+/** แหล่งอ้างอิงจริงจากผลค้นเว็บ (server ส่งมาจาก citations) — บรรทัดเดียว ไม่แนบลิงก์ยาว */
+export function formatSources(sources: unknown): string {
+  if (!Array.isArray(sources) || sources.length === 0) return '';
+  const items: string[] = [];
+  for (const s of sources.slice(0, 3)) {
+    let host = '';
+    try { host = new URL(String((s as any)?.url)).hostname.replace(/^www\./, ''); } catch { continue; }
+    const title = String((s as any)?.title || '').trim().slice(0, 50);
+    items.push(title ? `${title} (${host})` : host);
+  }
+  return items.length ? `\n\n📚 ที่มา: ${items.join(' · ')}` : '';
+}
+
 /** ข้อความแจ้งผู้ใช้เมื่อเรียก Claude ไม่สำเร็จ — บอกสาเหตุจริง ไม่ใช่คำตอบปลอม */
 export function buildApiErrorMessage(code: string): string {
   const reasons: Record<string, string> = {
@@ -108,6 +129,7 @@ export function buildApiErrorMessage(code: string): string {
     billing: 'ระบบยังเชื่อมต่อ AI ไม่ได้ (เครดิต API หมด) กรุณาแจ้งทีมงานค่ะ',
     not_configured: 'ระบบยังไม่ได้ตั้งค่า API key กรุณาแจ้งทีมงานค่ะ',
     quota_exceeded: 'เครดิตวันนี้ใช้ครบแล้ว จะได้เครดิตใหม่ตอนเที่ยงคืน (เวลาไทย) ค่ะ',
+    file_limit: 'วันนี้แนบไฟล์ครบโควตาแล้ว ส่งข้อความโดยไม่แนบไฟล์ได้ตามปกติ หรือลองแนบใหม่หลังเที่ยงคืน (เวลาไทย) ค่ะ',
     daily_user_cap: 'ช่วงเปิดทดลอง ระบบรับผู้ใช้จำนวนจำกัดต่อวัน และวันนี้เต็มแล้ว ลองใหม่หลังเที่ยงคืนนะคะ',
     ip_user_limit: 'เครือข่ายอินเทอร์เน็ตนี้มีผู้ใช้ครบจำนวนต่อวันแล้ว ลองใหม่หลังเที่ยงคืน หรือเปลี่ยนเครือข่ายค่ะ',
     invalid_request: 'ข้อความหรือไฟล์แนบมีรูปแบบที่ระบบไม่รองรับ (อาจยาวหรือใหญ่เกินไป) กรุณาลองใหม่ค่ะ',
@@ -143,29 +165,12 @@ class AIService {
     const agent = getAgentById(agentId);
     if (!agent) throw new Error(`ไม่พบ Ranger: ${rangerId}`);
 
-    // รหัสแบรนด์ฝั่ง browser — server ตรวจว่าเป็นแบรนด์ของเครื่องนี้ก่อนบันทึก
-    const brandKey = ctx.brandId && String(ctx.brandId) !== 'guest' ? String(ctx.brandId) : '';
-
-    // ── บันทึก user message ────────────────────────────────────────────────
-    if (brandKey) {
-      const userMsg: MessageRecord = {
-        brandId: brandKey,
-        role: 'user',
-        agentId,
-        agentName: agent.name,
-        content: text,
-        attachments: attachments?.map(f => ({ name: f.name, type: f.type, size: f.size })),
-        createdAt: new Date(),
-      };
-      // user message บันทึกทันที ไม่รอ
-      databaseService.saveMessage(userMsg).catch(() => {});
-    }
-
     // ── build context + messages ───────────────────────────────────────────
     // ข้อมูลแบรนด์อยู่ใน system prompt ที่เดียว (เดิมส่งซ้ำในข้อความแรกด้วย)
     const contextMsg = this.buildContextMessage(agent, ctx);
-    const system = `${agent.systemPrompt}\n\n---\n${contextMsg}`;
-    const messages = this.buildMessages(text, history, attachments);
+    // system prompt คงที่ทุกข้อความ (cache ได้) — ความรู้เฉพาะทางแนบกับข้อความผู้ใช้เฉพาะเมื่อคำถามตรงกับ skill
+    const system = `${agent.systemPrompt}\n\n${STANDARD_RULES}\n\n---\n${contextMsg}`;
+    const messages = this.buildMessages(withSkills(agentId, text), history, attachments);
 
     // ── Gate 1: validate input ─────────────────────────────────────────────
     const inputValidation = orchestratorEngine.validate(agentId, text);
@@ -181,7 +186,7 @@ class AIService {
     let credits: CreditInfo | undefined;
     let turnId: string | undefined;
     try {
-      const first = await this.callClaudeAPI(system, messages);
+      const first = await this.callClaudeAPI(system, messages, undefined, agentId);
       rawResponse = first.text;
       credits = first.credits;
       turnId = first.turnId;
@@ -192,24 +197,24 @@ class AIService {
       return {
         text: buildApiErrorMessage(code),
         ok: false,
+        errorCode: code,
         outputs: [],
         credits: err instanceof ClaudeApiError ? err.credits : undefined,
       };
     }
 
     // ── ส่งต่อ Orchestrator ทำงานต่อทั้งหมด ───────────────────────────────
-    // (Guard loop, saveMessage agent response, extractOutputs, badge)
+    // (Guard loop, extractOutputs, badge)
     const result = await orchestratorEngine.processAndDeliver({
       agentId,
       agentName: agent.name,
       userInput: text,
       rawResponse,
       context: ctx,
-      brandKey,
       messages,
       originalContent: this.collectOriginalContent(text, attachments),
       // รอบที่ Guard สั่งแก้ ส่ง turnId เดิม — server ไม่หักเครดิต
-      callClaudeFn: async (retryMessages) => (await this.callClaudeAPI(system, retryMessages, turnId)).text,
+      callClaudeFn: async (retryMessages) => (await this.callClaudeAPI(system, retryMessages, turnId, agentId)).text,
     });
 
     // ── อัปเดต in-memory history ───────────────────────────────────────────
@@ -289,8 +294,9 @@ class AIService {
     msg += `\n3. ถ้าคำถามใน "ถามก่อน" ของคุณมีคำตอบอยู่ในข้อมูลแบรนด์แล้ว ให้ข้ามข้อนั้น ถามเฉพาะสิ่งที่งานนี้ต้องใช้แต่ยังไม่มี (เช่น platform, ระยะเวลา) หรือช่องที่เขียนว่า "ไม่ระบุ"`;
     msg += `\n4. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
     msg += `\n5. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
-    msg += `\n6. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
-    msg += `\n7. ห้ามแต่งตัวเลขสถิติหรือผลวิจัย ถ้าจะอ้างตัวเลขต้องบอกแหล่งที่มา หรือบอกว่าเป็นการประมาณการ`;
+    msg += `\n6. ตอบตรงๆ กระชับ ไม่เกริ่นยาว คำตอบทั่วไปไม่เกิน 8-10 บรรทัด (งานส่งมอบแบบ [WORKFILE] ยาวได้เท่าที่จำเป็น)`;
+    msg += `\n7. ข้อมูลที่เปลี่ยนตามเวลา (ตัวเลขตลาด เทรนด์ ราคา กฎเกณฑ์) ให้ใช้ web search หาข้อมูลจริง แล้วสรุปเป็นคำตอบสั้นตามรูปแบบของคุณ ห้ามคัดลอกยาว ห้ามค้นทุกคำถาม และระบบจะแนบแหล่งที่มาให้เอง ไม่ต้องเขียนแหล่งที่มาซ้ำ`;
+    msg += `\n8. ห้ามเดาหรือแต่งตัวเลข สถิติ หรือผลวิจัย ใช้เฉพาะข้อมูลที่ผู้ใช้ให้หรือที่ค้นเจอจริง ถ้าไม่มีข้อมูลให้บอกตรงๆ`;
 
     return msg;
   }
@@ -387,7 +393,8 @@ class AIService {
   async callClaudeAPI(
     system: string,
     messages: Array<{ role: 'user' | 'assistant'; content: any }>,
-    turnId?: string
+    turnId?: string,
+    agent?: string
   ): Promise<{ text: string; credits?: CreditInfo; turnId?: string }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90000);
@@ -398,7 +405,7 @@ class AIService {
         res = await fetch('/api/anthropic', {
           method: 'POST',
           headers: apiHeaders(),
-          body: JSON.stringify(turnId ? { system, messages, turnId } : { system, messages }),
+          body: JSON.stringify({ system, messages, ...(turnId ? { turnId } : {}), ...(agent ? { agent } : {}) }),
           signal: controller.signal,
         });
       } catch (err: any) {
@@ -413,7 +420,7 @@ class AIService {
       if (data?.stopReason === 'refusal') throw new ClaudeApiError('refusal', 'refused');
       const text = typeof data?.text === 'string' ? data.text.trim() : '';
       if (!text) throw new ClaudeApiError('empty', `empty response (${data?.stopReason})`);
-      return { text, credits: data?.credits || undefined, turnId: data?.turnId || undefined };
+      return { text: text + formatSources(data?.sources), credits: data?.credits || undefined, turnId: data?.turnId || undefined };
     } finally {
       clearTimeout(timeout);
     }

@@ -8,7 +8,7 @@
  */
 
 import { isAllowedOrigin, sendError, clientIp, takeRateLimit } from './_lib/claude.js';
-import { getQuery, ensureBrandOwnership, ownerKeyFrom, str, strArray, readBody } from './_lib/db.js';
+import { getQuery, ensureRangerTables, BRANDS_TABLE, ownerKeyFrom, str, strArray, readBody } from './_lib/db.js';
 
 export const MAX_BRANDS_PER_OWNER = 10;
 
@@ -91,7 +91,7 @@ export function brandParams(ownerKey, b) {
 }
 
 const UPSERT_SQL = `
-  INSERT INTO brands (owner_key, client_id, brand_name_en, brand_name_th, industry, business_model,
+  INSERT INTO ${BRANDS_TABLE} (owner_key, client_id, brand_name_en, brand_name_th, industry, business_model,
     core_usp, competitors, tax_id, company_address, primary_color, secondary_colors, font_family,
     mood_keywords, video_style, forbidden_elements, logo_url, tone_of_voice, target_audience,
     target_persona, pain_points, multilingual_level, forbidden_words, brand_hashtags,
@@ -99,7 +99,7 @@ const UPSERT_SQL = `
   VALUES ($1, $2, $3, $4, $5, $6, $7::text::jsonb, $8::text::jsonb, $9, $10, $11, $12::text::jsonb, $13::text::jsonb,
     $14::text::jsonb, $15, $16::text::jsonb, $17, $18, $19, $20, $21::text::jsonb, $22, $23::text::jsonb, $24::text::jsonb,
     $25, $26, now())
-  ON CONFLICT (owner_key, client_id) WHERE owner_key IS NOT NULL DO UPDATE SET
+  ON CONFLICT (owner_key, client_id) DO UPDATE SET
     brand_name_en = EXCLUDED.brand_name_en, brand_name_th = EXCLUDED.brand_name_th,
     industry = EXCLUDED.industry, business_model = EXCLUDED.business_model,
     core_usp = EXCLUDED.core_usp, competitors = EXCLUDED.competitors, tax_id = EXCLUDED.tax_id,
@@ -127,11 +127,11 @@ export default async function handler(req, res) {
   if (!query) return sendError(res, 503, 'db_not_configured', 'ยังไม่ได้ตั้งค่าฐานข้อมูล');
 
   try {
-    await ensureBrandOwnership(query);
+    await ensureRangerTables(query);
 
     if (req.method === 'GET') {
       const rows = await query(
-        `SELECT ${BRAND_COLUMNS} FROM brands WHERE owner_key = $1 ORDER BY created_at DESC LIMIT $2`,
+        `SELECT ${BRAND_COLUMNS} FROM ${BRANDS_TABLE} WHERE owner_key = $1 ORDER BY created_at DESC LIMIT $2`,
         [ownerKey, MAX_BRANDS_PER_OWNER]);
       return res.status(200).json({ brands: rows.map(rowToBrand) });
     }
@@ -140,7 +140,7 @@ export default async function handler(req, res) {
     if (!params) return sendError(res, 400, 'invalid_request', 'ต้องมี id และชื่อแบรนด์');
 
     const [{ n }] = await query(
-      'SELECT count(*)::int AS n FROM brands WHERE owner_key = $1 AND client_id <> $2', [ownerKey, params[1]]);
+      `SELECT count(*)::int AS n FROM ${BRANDS_TABLE} WHERE owner_key = $1 AND client_id <> $2`, [ownerKey, params[1]]);
     if (n >= MAX_BRANDS_PER_OWNER) return sendError(res, 409, 'too_many_brands', 'จำนวนแบรนด์เกินกำหนด');
 
     const [row] = await query(UPSERT_SQL, params);

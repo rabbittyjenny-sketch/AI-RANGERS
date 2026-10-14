@@ -28,12 +28,14 @@ vercel
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | server-side เท่านั้น |
 | `DATABASE_URL` | `postgresql://...` | server-side เท่านั้น (เดิมชื่อ `VITE_DATABASE_URL` — ยังอ่านได้ แต่ให้เปลี่ยนชื่อ) |
 | `ELEVENLABS_API_KEY` | `sk_...` | optional |
-| `CLAUDE_MODEL` | `claude-haiku-5-5` | optional — โมเดลแชท (default Haiku 5.5) |
-| `CLAUDE_EFFORT` | `low` | optional — low / medium / high / none |
-| `WEB_SEARCH_MAX_USES` | `0` | optional — ค่าเริ่มต้นปิด web search |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | optional — โมเดลแชท (default Sonnet 4.6 — Haiku ตอบคุณภาพไม่พอ) |
+| `CLAUDE_EFFORT` | `none` | optional — low / medium / high / none (none = ไม่ส่ง) |
+| `WEB_SEARCH_MAX_USES` | `2` | optional — ค้นเว็บได้กี่ครั้งต่อข้อความ (0 = ปิด) แนบที่มาจริงท้ายคำตอบ |
+| `SEARCH_EXTRA_CREDITS` | `2` | optional — เครดิตที่หักเพิ่มเมื่อข้อความนั้นค้นเว็บจริง |
 | `CHAT_RATE_LIMIT` | `40` | optional — ข้อความต่อ IP ต่อชั่วโมง |
 | `GUARD_AI_ENABLED` | `true` | optional — `false` ปิดตัวตรวจ AI ทันที |
 | `DAILY_CREDITS` | `30` | optional — เครดิตต่อคนต่อวัน (รีเซ็ตเที่ยงคืนเวลาไทย) |
+| `DAILY_FILES` | `3` | optional — แนบไฟล์ได้กี่ไฟล์ต่อคนต่อวัน (0 = ไม่จำกัด) |
 | `DAILY_USER_CAP` | `20` | optional — ผู้ใช้สูงสุดต่อวันทั้งระบบ |
 | `IP_DAILY_USER_LIMIT` | `5` | optional — ผู้ใช้ใหม่ต่อ IP ต่อวัน |
 | `CREDITS_ENABLED` | `true` | optional — `false` ปิดระบบเครดิต |
@@ -43,9 +45,10 @@ vercel
 model / max_tokens / web search ถูกกำหนดฝั่ง server เท่านั้น (api/anthropic.js) browser เปลี่ยนไม่ได้
 
 ### ฐานข้อมูลและความเป็นเจ้าของแบรนด์
-- browser ไม่ต่อฐานข้อมูลตรงแล้ว — อ่าน/เขียนผ่าน `/api/brands`, `/api/messages`
-- แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (คอลัมน์ `owner_key`, `client_id` — function เพิ่มให้เองครั้งแรก)
-- แบรนด์เก่าที่บันทึกก่อนมีระบบเจ้าของ จะไม่แสดงให้ใครเห็น (ข้อมูลยังอยู่ ไม่ได้ลบ)
+- browser ไม่ต่อฐานข้อมูลตรงแล้ว — อ่าน/เขียนผ่าน `/api/brands` เท่านั้น — **ระบบไม่เก็บประวัติแชทเลย**
+- ตารางของ AI Rangers ขึ้นต้นด้วย `ranger_` ทั้งหมด (`ranger_brands`, `ranger_credit_*`, `ranger_usage_log`) — function สร้างเองครั้งแรก ไม่ต้องรัน migration
+- ฐานข้อมูล neon-vercel-DB มีตาราง `messages`, `users`, `conversations` ฯลฯ ของแอปเดิมอยู่แล้ว — AI Rangers ไม่อ่าน/เขียนตารางเหล่านั้น **อย่ารัน `drizzle-kit push`** กับฐานนี้ (จะพยายามแก้ตารางที่ไม่ใช่ของเรา)
+- แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (`owner_key` + `client_id`)
 - **หลังย้ายเสร็จ ให้เปลี่ยนรหัสผ่าน Neon** เพราะ connection string เดิมเคยอยู่ในไฟล์ที่ browser โหลด
 
 ### ระบบเครดิต
@@ -73,3 +76,15 @@ model / max_tokens / web search ถูกกำหนดฝั่ง server เ�
 - Login / user accounts
 - Chat history ใน Neon (persist ข้ามวัน)
 - 5 Agents เพิ่มเติม (visual, brand voice, ads, automation, analytics)
+
+### ดูสถิติว่าคนใช้น้องตัวไหนมากที่สุด
+ระบบนับการใช้งานรายน้องไว้ในตาราง `ranger_usage_log` (วัน, น้อง, รหัสผู้ใช้แบบแฮช, จำนวนข้อความ) — **ไม่มีเนื้อหาแชท** เปิด SQL Editor ใน Neon แล้วรัน:
+```sql
+SELECT agent_id, sum(messages) AS messages, count(DISTINCT user_hash) AS users
+FROM ranger_usage_log
+WHERE day >= current_date - 7
+GROUP BY agent_id
+ORDER BY messages DESC;
+```
+`other` = ข้อความจากเวอร์ชันเก่าที่ไม่ส่งชื่อน้อง หรือชื่อน้องที่ระบบไม่รู้จัก
+

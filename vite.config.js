@@ -12,7 +12,6 @@ function localApiFunctions(env) {
     '/api/guard': './api/guard.js',
     '/api/credits': './api/credits.js',
     '/api/brands': './api/brands.js',
-    '/api/messages': './api/messages.js',
   }
   return {
     name: 'local-api-functions',

@@ -11,7 +11,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-export const DEFAULT_CHAT_MODEL = 'claude-haiku-5-5';
+export const DEFAULT_CHAT_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_GUARD_MODEL = 'claude-haiku-5-5';
 
 let client = null;
@@ -127,4 +127,24 @@ export function extractText(content) {
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('');
+}
+
+/**
+ * แหล่งอ้างอิงจริงที่ Claude ใช้ตอบ (citations ของ web search) — ไม่ใช่ชื่อที่โมเดลแต่งเอง
+ * @returns {Array<{ title: string, url: string }>} ไม่ซ้ำ url
+ */
+export function extractSources(content, limit = 3) {
+  const out = [];
+  const seen = new Set();
+  for (const b of content || []) {
+    if (b.type !== 'text' || !Array.isArray(b.citations)) continue;
+    for (const c of b.citations) {
+      const url = typeof c?.url === 'string' ? c.url : '';
+      if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+      seen.add(url);
+      out.push({ title: String(c.title || '').slice(0, 120), url });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
 }

@@ -5,10 +5,9 @@
  * 1. Guard loop สูงสุด 3 ครั้ง
  * 2. ถ้าไม่ผ่าน → ส่งกลับ Claude พร้อมเหตุผล
  * 3. ถ้าเกิน 3 ครั้ง → แจ้ง user + แนะนำทีละ step
- * 4. บันทึก saveMessage() รอผลจริง (ไม่ fire-and-forget)
- * 5. extractOutputs()
- * 6. แนบป้ายผลตรวจจริง (buildGuardBadge)
- * 7. ส่งผลสุดท้ายกลับ UI
+ * 4. extractOutputs()
+ * 5. แนบป้ายผลตรวจจริง (buildGuardBadge)
+ * 6. ส่งผลสุดท้ายกลับ UI (ไม่เก็บประวัติแชท)
  *
  * aiService.ts หน้าที่เดียว: call Claude → ส่งต่อมาที่นี่
  */
@@ -17,7 +16,6 @@ import { Agent, getAllAgents, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { routeToAgent } from '../data/agent-routing';
 import { dataGuardian, DataGuardReport } from './dataGuardService';
-import { databaseService, MessageRecord } from './databaseService';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,8 +52,6 @@ export interface DeliverParams {
   userInput: string;
   rawResponse: string;
   context: MasterContext;
-  /** รหัสแบรนด์ (ว่าง = ไม่บันทึกประวัติ) */
-  brandKey: string;
   messages: Array<{ role: 'user' | 'assistant'; content: any }>;
   /** ข้อความต้นฉบับที่ผู้ใช้ส่งมา (ไฟล์แนบ/ข้อความยาว) ใช้ตรวจความคล้าย */
   originalContent?: string;
@@ -170,13 +166,13 @@ export class OrchestratorEngine {
    * Flow:
    * 1. ตรวจ Guard (dataGuardian.validateContent)
    * 2. ถ้า blocked → เพิ่ม retry message → call Claude ใหม่ (สูงสุด 3 ครั้ง)
-   * 3. ถ้าผ่าน → saveMessage → extractOutputs → แนบ badge → return
+   * 3. ถ้าผ่าน → extractOutputs → แนบ badge → return (ไม่เก็บประวัติแชท)
    * 4. ถ้าเกิน 3 ครั้ง → แจ้ง user + แนะนำทีละ step
    */
   async processAndDeliver(params: DeliverParams): Promise<DeliverResult> {
     const {
       agentId, agentName, userInput, context,
-      brandKey, messages, callClaudeFn, originalContent,
+      messages, callClaudeFn, originalContent,
     } = params;
 
     let responseText = params.rawResponse;
@@ -241,24 +237,6 @@ export class OrchestratorEngine {
       responseText = this.buildUserErrorMessage(blockReason);
     } else {
       responseText = responseText + buildGuardBadge(guardReport);
-    }
-
-    // ── บันทึก agent response ลง DB (รอผลจริง) ────────────────────────────
-    if (brandKey) {
-      try {
-        const agentMsg: MessageRecord = {
-          brandId: brandKey,
-          role: 'agent',
-          agentId,
-          agentName,
-          content: responseText,
-          createdAt: new Date(),
-        };
-        await databaseService.saveMessage(agentMsg);
-      } catch (saveErr) {
-        // บันทึกไม่สำเร็จ log ไว้แต่ไม่ block user
-        console.error('[Orchestrator] saveMessage failed:', saveErr);
-      }
     }
 
     // ── Extract outputs ([WORKFILE] blocks) ────────────────────────────────

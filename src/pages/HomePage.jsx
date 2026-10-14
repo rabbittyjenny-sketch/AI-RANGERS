@@ -55,7 +55,7 @@ export const HomePage = ({ onStart }) => {
             style={{ background: 'rgba(94,155,235,0.1)', color: '#5E9BEB', border: '1px solid rgba(94,155,235,0.2)' }}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-[#5E9BEB] animate-pulse" />
-            5 Rangers · 6-Layer Data Guard System
+            6 Rangers · 6-Layer Data Guard System
           </motion.div>
 
           {/* Tagline */}

@@ -2,7 +2,7 @@
  * Vercel Serverless Function — ยอดเครดิตวันนี้ของผู้ใช้
  *
  * Route: GET /api/credits   (header x-ranger-user = รหัสเครื่อง)
- * ตอบ: { enabled, used, remaining, limit, resetsAt }
+ * ตอบ: { enabled, used, remaining, limit, resetsAt, filesUsed, filesLimit }
  */
 
 import { isAllowedOrigin, sendError } from './_lib/claude.js';
@@ -16,6 +16,9 @@ export default async function handler(req, res) {
   if (!cfg.enabled) return res.status(200).json({ enabled: false });
 
   const store = await getCreditStore();
-  const { used, remaining } = await store.peek({ userKey: userKeyFrom(req), day: bangkokDay(), cfg });
-  return res.status(200).json({ enabled: true, used, remaining, limit: cfg.dailyCredits, resetsAt: nextResetIso() });
+  const { used, remaining, files } = await store.peek({ userKey: userKeyFrom(req), day: bangkokDay(), cfg });
+  return res.status(200).json({
+    enabled: true, used, remaining, limit: cfg.dailyCredits, resetsAt: nextResetIso(),
+    filesUsed: files ?? 0, filesLimit: cfg.dailyFiles,
+  });
 }

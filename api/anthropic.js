@@ -8,10 +8,10 @@
  * ANTHROPIC_API_KEY อยู่ฝั่ง server เท่านั้น
  *
  * Env (ตั้งใน Vercel — ทุกตัว optional ยกเว้น ANTHROPIC_API_KEY):
- *   CLAUDE_MODEL          default claude-haiku-5-5
- *   CLAUDE_EFFORT         low | medium | high | none   (default low; none = ไม่ส่ง effort)
+ *   CLAUDE_MODEL          default claude-sonnet-4-6 (โมเดลที่ใช้มาตลอด — Haiku ตอบคุณภาพไม่พอ)
+ *   CLAUDE_EFFORT         low | medium | high | none   (default none = ไม่ส่ง effort เหมือนเดิม)
  *   CHAT_MAX_TOKENS       default 4096
- *   WEB_SEARCH_MAX_USES   default 0 = ปิด (งานของ Ranger เป็นงานเขียน/วางแผน ไม่ต้องค้นเว็บ)
+ *   WEB_SEARCH_MAX_USES   default 2 ครั้งต่อข้อความ (0 = ปิด) — แนบแหล่งอ้างอิงจริงของผลค้นท้ายคำตอบ
  *   CHAT_RATE_LIMIT       ข้อความต่อ IP ต่อชั่วโมง, default 40 (0 = ไม่จำกัด)
  *   ALLOWED_ORIGINS       origin เพิ่มเติมที่อนุญาต คั่นด้วย comma
  *   DAILY_CREDITS / DAILY_USER_CAP / IP_DAILY_USER_LIMIT / CREDITS_ENABLED — ดู api/_lib/credits.js
@@ -30,13 +30,16 @@ import {
   toErrorPayload,
   sendError,
   extractText,
+  extractSources,
 } from './_lib/claude.js';
+import { logUsage } from './_lib/usage.js';
 import {
   creditConfig,
   getCreditStore,
   bangkokDay,
   nextResetIso,
   creditCost,
+  countAttachments,
   userKeyFrom,
 } from './_lib/credits.js';
 
@@ -48,7 +51,7 @@ const CREDIT_MESSAGES = {
 
 const MAX_MESSAGES = 30;
 const MAX_SYSTEM_CHARS = 30000;
-const MAX_TEXT_CHARS = 60000;
+const MAX_TEXT_CHARS = 200000; // เพดานกันข้อความใหญ่ผิดปกติ (ประมาณ 100k token) — เพดานจริงของไฟล์แนบคือจำนวนไฟล์ต่อวัน
 const MAX_PAUSE_CONTINUATIONS = 3;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
@@ -132,10 +135,10 @@ export function buildChatRequest(system, messages) {
     messages: cachedMessages,
   };
 
-  const effort = process.env.CLAUDE_EFFORT || 'low';
+  const effort = process.env.CLAUDE_EFFORT || 'none';
   if (effort !== 'none') request.output_config = { effort };
 
-  const searchUses = envInt('WEB_SEARCH_MAX_USES', 0);
+  const searchUses = envInt('WEB_SEARCH_MAX_USES', 2);
   if (searchUses > 0) {
     request.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: searchUses }];
   }
@@ -167,7 +170,12 @@ export default async function handler(req, res) {
   const retryTurnId = typeof req.body?.turnId === 'string' ? req.body.turnId : null;
   let store = null;
   let charged = 0;
+  let filesCharged = 0;
   let credits = null;
+  const balance = (cost, used, files) => ({
+    cost, used, remaining: Math.max(cfg.dailyCredits - used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso(),
+    filesUsed: files, filesLimit: cfg.dailyFiles,
+  });
 
   if (cfg.enabled) {
     store = await getCreditStore();
@@ -176,15 +184,20 @@ export default async function handler(req, res) {
       if (!allowed) return sendError(res, 429, 'retry_not_allowed', 'ไม่สามารถสร้างคำตอบใหม่ได้');
     } else {
       const cost = creditCost(parsed.messages);
-      const r = await store.reserve({ userKey, ip, cost, day, cfg });
+      const files = countAttachments(parsed.messages);
+      const r = await store.reserve({ userKey, ip, cost, files, day, cfg });
       if (!r.ok) {
         return res.status(429).json({
-          error: { code: r.reason, message: CREDIT_MESSAGES[r.reason] },
-          credits: { cost: 0, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() },
+          error: {
+            code: r.reason,
+            message: r.reason === 'file_limit' ? `แนบไฟล์ได้วันละ ${cfg.dailyFiles} ไฟล์ วันนี้ครบแล้ว` : CREDIT_MESSAGES[r.reason],
+          },
+          credits: balance(0, r.used, r.files ?? 0),
         });
       }
       charged = cost;
-      credits = { cost, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() };
+      filesCharged = files;
+      credits = balance(cost, r.used, r.files ?? files);
     }
   }
 
@@ -195,6 +208,7 @@ export default async function handler(req, res) {
     const client = getClient();
     let response;
     let text = '';
+    const sources = [];
     for (let i = 0; i <= MAX_PAUSE_CONTINUATIONS; i++) {
       response = await client.messages.create(request, { timeout: 75_000, maxRetries: 1 });
       const u = response.usage || {};
@@ -204,6 +218,9 @@ export default async function handler(req, res) {
       usage.cache_creation_input_tokens += u.cache_creation_input_tokens || 0;
       usage.web_search_requests += u.server_tool_use?.web_search_requests || 0;
       text += extractText(response.content);
+      for (const s of extractSources(response.content)) {
+        if (sources.length < 3 && !sources.some(x => x.url === s.url)) sources.push(s);
+      }
 
       if (response.stop_reason !== 'pause_turn') break;
       // web search ที่ใช้เวลานาน — ส่ง assistant content กลับไปให้ทำต่อ
@@ -212,13 +229,31 @@ export default async function handler(req, res) {
 
     // ไม่ได้คำตอบที่ใช้ได้ (ปฏิเสธ/ว่าง) — คืนเครดิต
     if (charged && (response.stop_reason === 'refusal' || !text.trim())) {
-      await store.refund({ userKey, cost: charged, day });
+      await store.refund({ userKey, cost: charged, files: filesCharged, day });
       credits = null;
+    }
+    // ค้นเว็บจริงในข้อความนี้ → หักเพิ่มตามต้นทุนจริง (เท่าที่เหลือ ไม่ติดลบ)
+    if (store && charged && credits && usage.web_search_requests > 0 && cfg.searchExtra > 0) {
+      const extra = Math.min(cfg.searchExtra, Math.max(cfg.dailyCredits - credits.used, 0));
+      if (extra > 0) {
+        const r = await store.reserve({ userKey, ip, cost: extra, day, cfg });
+        if (r.ok) {
+          charged += extra;
+          credits = balance(charged, r.used, r.files ?? credits.filesUsed);
+        }
+      }
+    }
+    // ตัวเลขใช้จริงต่อข้อความ (ไม่มีเนื้อหา/ตัวตนผู้ใช้) — ไว้ตรวจต้นทุนจาก Vercel logs
+    console.info('[api/anthropic] usage', JSON.stringify({ model: response.model, ...usage, credits: credits?.cost ?? 0, retry: !!retryTurnId }));
+    // นับการใช้งานรายน้อง (ข้อความใหม่ที่ได้คำตอบเท่านั้น — ไม่นับรอบที่ guard สั่งแก้ ไม่นับที่ error/ปฏิเสธ)
+    if (!retryTurnId && text.trim() && response.stop_reason !== 'refusal') {
+      await logUsage({ agent: req.body?.agent, userKey, day });
     }
     const turnId = credits ? await store.openTurn({ userKey, day }) : undefined;
 
     return res.status(200).json({
       text,
+      sources,
       stopReason: response.stop_reason,
       model: response.model,
       usage,
@@ -226,7 +261,7 @@ export default async function handler(req, res) {
       turnId,
     });
   } catch (err) {
-    if (charged) await store.refund({ userKey, cost: charged, day }).catch(() => {});
+    if (charged) await store.refund({ userKey, cost: charged, files: filesCharged, day }).catch(() => {});
     const e = toErrorPayload(err);
     console.error('[api/anthropic]', e.code, err?.status, String(err?.message || '').slice(0, 300));
     return sendError(res, e.status, e.code, e.message);
