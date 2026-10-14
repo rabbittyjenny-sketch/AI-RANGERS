@@ -13,6 +13,7 @@
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
+import { withKnowledge } from '../data/rangerKnowledge';
 import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
 import { getDeviceId } from './deviceId';
@@ -164,7 +165,7 @@ class AIService {
     // ── build context + messages ───────────────────────────────────────────
     // ข้อมูลแบรนด์อยู่ใน system prompt ที่เดียว (เดิมส่งซ้ำในข้อความแรกด้วย)
     const contextMsg = this.buildContextMessage(agent, ctx);
-    const system = `${agent.systemPrompt}\n\n---\n${contextMsg}`;
+    const system = `${withKnowledge(agentId, agent.systemPrompt)}\n\n---\n${contextMsg}`;
     const messages = this.buildMessages(text, history, attachments);
 
     // ── Gate 1: validate input ─────────────────────────────────────────────
