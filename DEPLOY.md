@@ -28,11 +28,25 @@ vercel
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | server-side เท่านั้น |
 | `VITE_DATABASE_URL` | `postgresql://...` | browser + server |
 | `ELEVENLABS_API_KEY` | `sk_...` | optional |
+| `CLAUDE_MODEL` | `claude-haiku-5-5` | optional — โมเดลแชท (default Haiku 5.5) |
+| `CLAUDE_EFFORT` | `low` | optional — low / medium / high / none |
+| `WEB_SEARCH_MAX_USES` | `2` | optional — 0 = ปิด web search |
+| `CHAT_RATE_LIMIT` | `40` | optional — ข้อความต่อ IP ต่อชั่วโมง |
+| `GUARD_AI_ENABLED` | `true` | optional — `false` ปิดตัวตรวจ AI ทันที |
+| `ALLOWED_ORIGINS` | `https://...` | optional — โดเมนเพิ่มเติม (custom domain) |
+
+**ห้ามตั้ง** `VITE_ANTHROPIC_API_KEY` หรือ `VITE_CLAUDE_MODEL` — โค้ดเลิกใช้แล้ว และตัวแปร `VITE_` ถูกฝังลง browser
+model / max_tokens / web search ถูกกำหนดฝั่ง server เท่านั้น (api/anthropic.js) browser เปลี่ยนไม่ได้
+
+### ตั้งวงเงินใน Claude Console (ทำก่อนเปิดสาธารณะ)
+ใน Claude Console (หน้า Limits ของ workspace) ตั้ง spend limit — ตัวกันสุดท้ายถ้ามีคนใช้งานผิดปกติ
 
 ### ทดสอบหลัง deploy
 1. เปิด URL → หน้า Home โหลดได้
 2. กด "เริ่มใช้งาน" → Workspace เปิดได้
-3. เลือก Ranger → ส่งข้อความ → ได้รับคำตอบ (ไม่ใช่ offline fallback)
+3. เลือก Ranger → ส่งข้อความ → ได้รับคำตอบพร้อมป้าย "🛡️ ✅ ผ่านการตรวจ 6 ด้าน"
+   - ถ้าเห็น "⚠️ ยังตอบไม่ได้ในขณะนี้" ข้อความจะบอกสาเหตุ (API key / เครดิต / rate limit)
+   - ถ้าเห็น "ตรวจได้เฉพาะกฎพื้นฐาน" แปลว่า /api/guard ใช้งานไม่ได้ — ดู Vercel function logs
 4. สลับ Ranger แล้วกลับ → แชทเก่ายังอยู่
 5. ตั้งค่าแบรนด์ → บันทึก → refresh → ข้อมูลยังอยู่ (Neon)
 

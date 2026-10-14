@@ -1,13 +1,22 @@
 /**
- * Enhanced Data Validation & Fact Checking System
+ * Data Guard — ตรวจคำตอบของ Ranger ก่อนส่งถึงผู้ใช้ (6 ด้าน)
  *
- * หลักการ:
- * - BLOCKED: เฉพาะการละเมิดจริงๆ (cross-brand access, trademark, artist IP)
- * - WARNING: ข้อมูลไม่ครบ, ไม่มี brand data → แจ้งเตือนแต่ไม่ block
- * - PASSED: ผ่านปกติ
+ * ตรวจด้วยกฎในโค้ด (เร็ว ไม่เสียเงิน ผลแน่นอน):
+ *   1. isolation        — เนื้อหาชวนขโมย/เจาะข้อมูลคนอื่น
+ *   2. antiCopycat      — คล้ายต้นฉบับที่ผู้ใช้ส่งมา, สโลแกน trademark, อ้างชื่อศิลปิน
+ *   6. consistency (ส่วนคำต้องห้าม) — ใช้คำที่แบรนด์ห้ามใช้
  *
- * ห้าม block เพราะ user ไม่กรอกข้อมูลแบรนด์ (guest) —
- * นั่นเป็นสิทธิ์ของ user ที่จะเลือกไม่กรอก
+ * ตรวจด้วย AI ผ่าน /api/guard (ต้องเข้าใจความหมายภาษาไทย):
+ *   3. factCheck, 4. uspGrounding, 5. referenceValidation, 6. consistency (โทนเสียง)
+ *
+ * นโยบาย block (ส่งให้ Claude เขียนใหม่) — เฉพาะกรณีชัดเจน:
+ *   isolation, คำต้องห้ามของแบรนด์, ขัดกับ USP โดยตรง, แต่งตัวเลข/สถิติโดยไม่มีที่มา
+ * ที่เหลือเป็น warning — แจ้งผู้ใช้แต่ไม่ block
+ *
+ * ถ้าตัวตรวจ AI ไม่พร้อม: ไม่ block ผู้ใช้ แต่รายงาน aiChecked=false
+ * เพื่อให้ UI ไม่แสดงป้ายว่าผ่านการตรวจครบ
+ *
+ * ห้าม block เพราะ user ไม่กรอกข้อมูลแบรนด์ (guest)
  */
 
 export interface ValidationRule {
@@ -26,407 +35,293 @@ export interface ValidationResult {
   source?: string;
 }
 
+export type GuardCheckId =
+  | 'isolation'
+  | 'antiCopycat'
+  | 'factCheck'
+  | 'uspGrounding'
+  | 'referenceValidation'
+  | 'consistency';
+
 export interface DataGuardReport {
   contentId?: string;
   timestamp: string;
-  checks: {
-    isolation: ValidationResult;
-    antiCopycat: ValidationResult;
-    factCheck: ValidationResult;
-    uspGrounding: ValidationResult;
-    referenceValidation: ValidationResult;
-    consistency: ValidationResult;
-  };
+  checks: Record<GuardCheckId, ValidationResult>;
   overallStatus: 'passed' | 'warning' | 'blocked';
+  /** ข้อแนะนำจากทุกด้านที่ไม่ผ่านหรือมีคำเตือน */
   recommendations: string[];
+  /** เหตุผลเฉพาะด้านที่ block — ใช้ส่งกลับให้ Claude แก้ */
+  blockReasons: string[];
+  /** ตัวตรวจ AI ทำงานครบหรือไม่ */
+  aiChecked: boolean;
+  aiError?: string;
 }
 
-/**
- * 1. ISOLATION GUARD
- * Block เฉพาะตอนที่ content พยายาม access ข้อมูลแบรนด์อื่น
- * ไม่ block เพราะ guest / ไม่มีข้อมูลแบรนด์
- */
+export interface GuardContext {
+  brandId?: string;
+  brandNameTh?: string;
+  coreUSP?: string;
+  toneOfVoice?: string;
+  targetAudience?: string;
+  forbiddenWords?: string[];
+}
+
+export interface GuardMetadata {
+  /** ข้อความต้นฉบับที่ผู้ใช้ส่งมา (เช่น ไฟล์แนบ) ใช้เทียบความคล้าย */
+  originalContent?: string;
+  userInput?: string;
+}
+
+const PASS = (message: string): ValidationResult => ({ passed: true, severity: 'info', message });
+
+// ── 1. ISOLATION ──────────────────────────────────────────────────────────────
+// ไม่ block งานวิเคราะห์คู่แข่งตามปกติ — จับเฉพาะเนื้อหาที่ชวนขโมย/เจาะข้อมูล
+const THEFT_PATTERNS = [
+  /\b(steal|hack|scrape|leak)\w*\b.{0,40}\b(data|database|customer list|credentials?)\b/i,
+  /(ขโมย|แฮ็?ก|เจาะระบบ|ลักลอบ).{0,40}(ข้อมูล|ฐานข้อมูล|รายชื่อลูกค้า|รหัสผ่าน)/,
+];
+
 export const isolationGuard: ValidationRule = {
   id: 'isolation',
   name: 'Brand Data Isolation',
-  description: 'ป้องกัน cross-brand data access เท่านั้น',
+  description: 'กันเนื้อหาที่ชวนขโมย/เจาะข้อมูลของแบรนด์หรือบุคคลอื่น',
   severity: 'error',
-  check: (context: any, content: string) => {
-    // ถ้าไม่มี brandId หรือเป็น guest → pass (warning เท่านั้น ไม่ block)
-    if (!context || !context.brandId || context.brandId === 'guest') {
-      return {
-        passed: true,
-        severity: 'info',
-        message: '✅ ผ่าน — ยังไม่มีข้อมูลแบรนด์ (ไม่บังคับ)',
-      };
+  check: (context: GuardContext, content: string) => {
+    if (!context?.brandId || context.brandId === 'guest') {
+      return PASS('✅ ผ่าน — ยังไม่มีข้อมูลแบรนด์ (ไม่บังคับ)');
     }
-
-    // ตรวจเฉพาะกรณีที่ content พยายาม access ข้ามแบรนด์จริงๆ
-    const crossBrandPatterns = [
-      /clone.*brand|steal.*brand|copy.*competitor.*data/gi,
-      /access.*other.*brand|other.*brand.*data/gi,
-    ];
-
-    for (const pattern of crossBrandPatterns) {
-      if (pattern.test(content)) {
-        return {
-          passed: false,
-          severity: 'error',
-          message: '❌ ตรวจพบการพยายามเข้าถึงข้อมูลแบรนด์อื่น',
-          suggestion: 'ใช้เฉพาะข้อมูลแบรนด์ของคุณเท่านั้น',
-        };
-      }
-    }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: `✅ ผ่าน — Brand isolation ปลอดภัย`,
-      source: `Brand ID: ${context.brandId}`,
-    };
-  },
-};
-
-/**
- * 2. ANTI-COPYCAT GUARD
- * ตรวจ similarity และ artist IP
- * ไม่ block เพราะ originalContent ว่าง (ไม่มีอะไรให้เปรียบเทียบ)
- */
-export const antiCopycatGuard: ValidationRule = {
-  id: 'antiCopycat',
-  name: 'Anti-Copycat & IP Protection',
-  description: 'ป้องกันการลอกงานและละเมิด IP',
-  severity: 'warning',
-  check: (context: any, newContent: string, metadata?: any) => {
-    const originalContent = metadata?.originalContent || '';
-
-    // ไม่มีต้นฉบับเปรียบเทียบ → pass เสมอ
-    if (!originalContent) {
-      return {
-        passed: true,
-        severity: 'info',
-        message: '✅ ผ่าน — ไม่มีต้นฉบับเปรียบเทียบ',
-      };
-    }
-
-    const similarity = calculateStringSimilarity(originalContent, newContent);
-
-    if (similarity > 0.9) {
+    if (THEFT_PATTERNS.some(p => p.test(content))) {
       return {
         passed: false,
         severity: 'error',
-        message: `❌ ความคล้ายคลึง ${Math.round(similarity * 100)}% — ต้องเปลี่ยนแปลงอย่างแท้จริง`,
-        suggestion: 'ปรับ Brand Voice และโครงสร้างประโยคให้แตกต่างขึ้น',
+        message: '❌ พบเนื้อหาที่ชวนขโมยหรือเจาะข้อมูลผู้อื่น',
+        suggestion: 'ตัดส่วนที่แนะนำให้ขโมย เจาะ หรือดึงข้อมูลของผู้อื่นโดยไม่ได้รับอนุญาตออก',
       };
     }
+    return { ...PASS('✅ ผ่าน — Brand isolation ปลอดภัย'), source: `Brand ID: ${context.brandId}` };
+  },
+};
 
-    if (similarity > 0.7) {
+// ── 2. ANTI-COPYCAT ───────────────────────────────────────────────────────────
+const TRADEMARK_SLOGANS = [
+  /just do it/i, /think different/i, /i'?m lovin'? it/i,
+  /because you'?re worth it/i, /open happiness/i, /impossible is nothing/i,
+];
+const ARTIST_PATTERN =
+  /\b(picasso|van gogh|warhol|monet|banksy|kaws|basquiat|dali)\b|ปิกัสโซ|แวนโก๊ะ|แวน ?โก๊ะ|วอร์ฮอล|แบงก์ซี|บาสเกีย|ดาลี/i;
+
+/** ความคล้ายแบบ character 4-gram Jaccard — เร็วพอสำหรับข้อความยาวใน browser */
+export function textSimilarity(a: string, b: string): number {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '');
+  const grams = (s: string) => {
+    const set = new Set<string>();
+    for (let i = 0; i + 4 <= s.length; i++) set.add(s.slice(i, i + 4));
+    return set;
+  };
+  const s1 = norm(a), s2 = norm(b);
+  if (!s1 || !s2) return 0;
+  if (s1 === s2) return 1;
+  const g1 = grams(s1), g2 = grams(s2);
+  if (g1.size === 0 || g2.size === 0) return 0;
+  let inter = 0;
+  for (const g of g1) if (g2.has(g)) inter++;
+  return inter / (g1.size + g2.size - inter);
+}
+
+export const antiCopycatGuard: ValidationRule = {
+  id: 'antiCopycat',
+  name: 'Anti-Copycat & IP Protection',
+  description: 'ตรวจความคล้ายต้นฉบับ, สโลแกน trademark และการอ้างชื่อศิลปิน',
+  severity: 'warning',
+  check: (_context: GuardContext, content: string, metadata?: GuardMetadata) => {
+    const slogan = TRADEMARK_SLOGANS.map(p => content.match(p)?.[0]).find(Boolean);
+    if (slogan) {
       return {
         passed: false,
         severity: 'warning',
-        message: `⚠️ ความคล้ายคลึง ${Math.round(similarity * 100)}% — พิจารณาปรับปรุง`,
-        suggestion: 'ลองเปลี่ยนโครงสร้างประโยคให้มากขึ้น',
+        message: `⚠️ พบสโลแกนที่เป็น trademark ของแบรนด์อื่น: "${slogan}"`,
+        suggestion: 'เขียนสโลแกนใหม่ในแบบของแบรนด์เอง',
       };
     }
 
-    // ตรวจชื่อศิลปินที่มีตัวตน
-    const artistPatterns = [/picasso|warhol|monet|van gogh|banksy|kaws/gi];
-    for (const pattern of artistPatterns) {
-      if (pattern.test(newContent)) {
+    const artist = content.match(ARTIST_PATTERN)?.[0];
+    if (artist) {
+      return {
+        passed: false,
+        severity: 'warning',
+        message: `⚠️ อ้างชื่อศิลปินที่มีตัวตน: "${artist}"`,
+        suggestion: 'ใช้ Mood Keywords แทน เช่น แทน "Picasso style" ให้ใช้ "Cubist and artistic"',
+      };
+    }
+
+    const original = metadata?.originalContent || '';
+    if (original.length >= 200) {
+      const sim = textSimilarity(original, content);
+      if (sim > 0.9) {
         return {
           passed: false,
           severity: 'warning',
-          message: '⚠️ ห้ามอ้างชื่อศิลปินที่มีตัวตน — ใช้ Mood Keywords แทน',
-          suggestion: 'เช่น แทน "Picasso style" ให้ใช้ "Cubist and artistic"',
+          message: `⚠️ เนื้อหาคล้ายต้นฉบับที่ส่งมา ${Math.round(sim * 100)}%`,
+          suggestion: 'ถ้าต้นฉบับเป็นงานของผู้อื่น ควรเรียบเรียงใหม่ให้แตกต่าง',
         };
       }
+      return PASS(`✅ ผ่าน — ความคล้ายต้นฉบับ ${Math.round(sim * 100)}%`);
     }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: `✅ ผ่าน — ความคล้ายคลึง ${Math.round(similarity * 100)}%`,
-    };
+    return PASS('✅ ผ่าน — ไม่พบ trademark หรือการอ้างชื่อศิลปิน');
   },
 };
 
-/**
- * 3. FACT CHECK GUARD
- * ตรวจ hallucination markers
- * warning เท่านั้น ไม่ block — เพราะ Claude อาจใช้คำเหล่านี้ตามบริบทปกติ
- */
-export const factCheckGuard: ValidationRule = {
-  id: 'factCheck',
-  name: 'Fact Check & No Hallucination',
-  description: 'ตรวจสอบข้อมูลที่อาจเป็น hallucination',
-  severity: 'warning',
-  check: (context: any, content: string) => {
-    // ตรวจเฉพาะตัวเลขที่อาจเป็น hallucination + ไม่มีแหล่งที่มา
-    const highRiskPatterns = [
-      /\d+%\s*(increase|decrease|growth|เพิ่ม|ลด|เติบโต)/gi,
-      /\$\d+[KMB]?\s*(revenue|sales|profit|รายได้|ยอดขาย)/gi,
-    ];
-
-    let hasHighRisk = false;
-    const found: string[] = [];
-
-    for (const pattern of highRiskPatterns) {
-      const matches = content.match(pattern);
-      if (matches) {
-        hasHighRisk = true;
-        found.push(matches[0]);
-      }
-    }
-
-    if (hasHighRisk) {
-      // warning เท่านั้น ไม่ block
-      return {
-        passed: true,
-        severity: 'warning',
-        message: `⚠️ พบตัวเลขที่ควรระบุแหล่งที่มา: ${found.slice(0, 2).join(', ')}`,
-        suggestion: 'เพิ่มคำว่า "ประมาณการ" หรือระบุแหล่งที่มา',
-      };
-    }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: '✅ ผ่าน — ไม่พบข้อมูลที่น่าสงสัย',
-    };
-  },
-};
-
-/**
- * 4. USP GROUNDING GUARD
- * ตรวจว่า output ขัดกับ USP ของแบรนด์ไหม
- * ถ้าไม่มี USP → pass เสมอ
- */
-export const uspGroundingGuard: ValidationRule = {
-  id: 'uspGrounding',
-  name: 'USP Grounding',
-  description: 'ตรวจความสอดคล้องกับ Core USP',
-  severity: 'warning',
-  check: (context: any, content: string) => {
-    if (!context?.coreUSP) {
-      return {
-        passed: true,
-        severity: 'info',
-        message: '⏭️ ข้ามการตรวจสอบ — ไม่พบ Core USP',
-      };
-    }
-
-    const usp = context.coreUSP.toLowerCase();
-    const contentLower = content.toLowerCase();
-
-    const contradictions = [
-      { usp: 'sustainable|eco|green', opposite: 'plastic|disposable', label: 'Eco' },
-      { usp: 'premium|luxury|high-end', opposite: 'cheap|budget', label: 'Premium' },
-      { usp: 'fast|quick|speed', opposite: 'slow|delay', label: 'Speed' },
-    ];
-
-    for (const contra of contradictions) {
-      const uspMatches = new RegExp(contra.usp).test(usp);
-      const oppositeMatches = new RegExp(contra.opposite).test(contentLower);
-
-      if (uspMatches && oppositeMatches) {
-        return {
-          passed: false,
-          severity: 'warning',
-          message: `⚠️ เนื้อหาอาจขัดกับ USP (${contra.label})`,
-          suggestion: `ตรวจสอบให้สอดคล้องกับ USP: "${context.coreUSP}"`,
-        };
-      }
-    }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: '✅ ผ่าน — เนื้อหาสอดคล้องกับ USP',
-    };
-  },
-};
-
-/**
- * 5. REFERENCE VALIDATION GUARD
- * warning เท่านั้น ไม่ block
- */
-export const referenceValidationGuard: ValidationRule = {
-  id: 'referenceValidation',
-  name: 'Reference Validation',
-  description: 'ตรวจการอ้างอิงแหล่งที่มา',
-  severity: 'info',
-  check: (context: any, content: string) => {
-    const dataMentions = [/\d+%/g, /research|study|survey/gi];
-    const citationPatterns = [/\[source|according to|อ้างอิง|ที่มา/gi];
-
-    const hasDataClaims = dataMentions.some(p => p.test(content));
-    const hasCitations = citationPatterns.some(p => p.test(content));
-
-    if (hasDataClaims && !hasCitations) {
-      return {
-        passed: true,
-        severity: 'warning',
-        message: '⚠️ มีข้อมูลเชิงตัวเลขแต่ไม่มีแหล่งที่มา',
-        suggestion: 'ควรระบุแหล่งที่มาหรือใช้คำว่า "ประมาณการ"',
-      };
-    }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: '✅ ผ่าน',
-    };
-  },
-};
-
-/**
- * 6. CONSISTENCY CHECK GUARD
- * ตรวจ tone mismatch
- * warning เท่านั้น ไม่ block
- */
-export const consistencyCheckGuard: ValidationRule = {
-  id: 'consistency',
-  name: 'Consistency Check',
-  description: 'ตรวจ tone และ mood alignment',
-  severity: 'warning',
-  check: (context: any, content: string) => {
-    if (!context?.toneOfVoice) {
-      return {
-        passed: true,
-        severity: 'info',
-        message: '⏭️ ข้ามการตรวจสอบ — ไม่พบ Tone of Voice',
-      };
-    }
-
-    const toneChecks: Record<string, RegExp[]> = {
-      formal: [/lol|omg|haha|lmao/gi],
-      professional: [/yo dude|bro|pal/gi],
-    };
-
-    const tone = context.toneOfVoice as string;
-    if (toneChecks[tone]?.[0]?.test(content)) {
-      return {
-        passed: true,
-        severity: 'warning',
-        message: `⚠️ ภาษาอาจไม่ตรงกับ Tone (${tone})`,
-        suggestion: 'ปรับโทนภาษาให้เหมาะกับแบรนด์',
-      };
-    }
-
-    return {
-      passed: true,
-      severity: 'info',
-      message: '✅ ผ่าน — Tone สอดคล้องกับแบรนด์',
-    };
-  },
-};
-
-// ── Helper ────────────────────────────────────────────────────────────────────
-
-function calculateStringSimilarity(str1: string, str2: string): number {
-  const s1 = str1.toLowerCase().replace(/\s+/g, '');
-  const s2 = str2.toLowerCase().replace(/\s+/g, '');
-  const longer = s1.length > s2.length ? s1 : s2;
-  const shorter = s1.length > s2.length ? s2 : s1;
-  if (longer.length === 0) return 1.0;
-  const editDistance = getEditDistance(longer, shorter);
-  return (longer.length - editDistance) / longer.length;
+// ── 6 (ส่วนกฎ). FORBIDDEN WORDS ──────────────────────────────────────────────
+export function findForbiddenWords(content: string, forbiddenWords?: string[]): string[] {
+  if (!Array.isArray(forbiddenWords)) return [];
+  const lower = content.toLowerCase();
+  return forbiddenWords
+    .map(w => String(w || '').trim())
+    .filter(w => w.length > 0 && lower.includes(w.toLowerCase()));
 }
 
-function getEditDistance(s1: string, s2: string): number {
-  const costs: number[] = [];
-  for (let i = 0; i <= s1.length; i++) {
-    let lastValue = i;
-    for (let j = 0; j <= s2.length; j++) {
-      if (i === 0) {
-        costs[j] = j;
-      } else if (j > 0) {
-        let newValue = costs[j - 1];
-        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-        }
-        costs[j - 1] = lastValue;
-        lastValue = newValue;
-      }
-    }
-    if (i > 0) costs[s2.length] = lastValue;
+// ── AI checks (/api/guard) ────────────────────────────────────────────────────
+type AiVerdict = { verdict: 'pass' | 'warn' | 'fail'; reason: string };
+type AiChecks = Record<'factCheck' | 'uspGrounding' | 'referenceValidation' | 'consistency', AiVerdict>;
+
+const AI_CHECK_NAMES: Record<keyof AiChecks, string> = {
+  factCheck: 'Fact Check',
+  uspGrounding: 'USP Grounding',
+  referenceValidation: 'Reference Validation',
+  consistency: 'Consistency Check',
+};
+
+/** ด้านที่ fail แล้ว block ได้ — ที่เหลือลดเป็น warning */
+const AI_BLOCKING: Record<keyof AiChecks, boolean> = {
+  factCheck: true,
+  uspGrounding: true,
+  referenceValidation: false,
+  consistency: false,
+};
+
+const AI_TIMEOUT_MS = 15000;
+
+async function runAiChecks(
+  context: GuardContext,
+  content: string,
+  metadata?: GuardMetadata
+): Promise<{ checks: AiChecks } | { error: string }> {
+  if (typeof fetch === 'undefined') return { error: 'fetch unavailable' };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+  try {
+    const res = await fetch('/api/guard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        userInput: metadata?.userInput || '',
+        brand: {
+          name: context?.brandNameTh || '',
+          usp: context?.coreUSP || '',
+          tone: context?.toneOfVoice || '',
+          audience: context?.targetAudience || '',
+        },
+      }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { error: data?.error?.code || `http_${res.status}` };
+    if (data?.skipped) return { error: 'disabled' };
+    if (!data?.checks) return { error: 'invalid_response' };
+    return { checks: data.checks as AiChecks };
+  } catch (err: any) {
+    return { error: err?.name === 'AbortError' ? 'timeout' : 'network' };
+  } finally {
+    clearTimeout(timer);
   }
-  return costs[s2.length];
+}
+
+function toResult(id: keyof AiChecks, v: AiVerdict): ValidationResult {
+  if (v.verdict === 'pass') return PASS(`✅ ${AI_CHECK_NAMES[id]} — ผ่าน`);
+  const block = v.verdict === 'fail' && AI_BLOCKING[id];
+  return {
+    passed: !block,
+    severity: block ? 'error' : 'warning',
+    message: `${block ? '❌' : '⚠️'} ${AI_CHECK_NAMES[id]} — ${v.reason}`,
+    suggestion: v.reason,
+  };
 }
 
 // ── Master Guardian ───────────────────────────────────────────────────────────
 
 export class DataGuardian {
-  private rules: ValidationRule[] = [
-    isolationGuard,
-    antiCopycatGuard,
-    factCheckGuard,
-    uspGroundingGuard,
-    referenceValidationGuard,
-    consistencyCheckGuard,
-  ];
+  /** เปลี่ยนได้ในเทส */
+  aiChecksEnabled = true;
 
   async validateContent(
-    context: any,
+    context: GuardContext,
     content: string,
-    metadata?: any,
+    metadata?: GuardMetadata,
     contentId?: string
   ): Promise<DataGuardReport> {
-    const report: DataGuardReport = {
-      contentId,
-      timestamp: new Date().toISOString(),
-      checks: {
-        isolation: { passed: true, severity: 'info', message: 'Pending' },
-        antiCopycat: { passed: true, severity: 'info', message: 'Pending' },
-        factCheck: { passed: true, severity: 'info', message: 'Pending' },
-        uspGrounding: { passed: true, severity: 'info', message: 'Pending' },
-        referenceValidation: { passed: true, severity: 'info', message: 'Pending' },
-        consistency: { passed: true, severity: 'info', message: 'Pending' },
-      },
-      recommendations: [],
-      overallStatus: 'passed',
-    };
+    const checks = {} as Record<GuardCheckId, ValidationResult>;
 
-    for (const rule of this.rules) {
-      const result = rule.check(context, content, metadata);
-      (report.checks as any)[rule.id] = result;
+    checks.isolation = isolationGuard.check(context, content, metadata);
+    checks.antiCopycat = antiCopycatGuard.check(context, content, metadata);
 
-      if (!result.passed) {
-        // blocked เฉพาะ error severity เท่านั้น
-        if (result.severity === 'error') {
-          report.overallStatus = 'blocked';
-        } else if (result.severity === 'warning' && report.overallStatus === 'passed') {
-          report.overallStatus = 'warning';
-        }
+    let aiChecked = false;
+    let aiError: string | undefined;
+    const ai = this.aiChecksEnabled
+      ? await runAiChecks(context, content, metadata)
+      : { error: 'disabled' };
+
+    if ('checks' in ai) {
+      aiChecked = true;
+      for (const id of Object.keys(AI_CHECK_NAMES) as Array<keyof AiChecks>) {
+        checks[id] = toResult(id, ai.checks[id]);
       }
-
-      if (result.suggestion) {
-        report.recommendations.push(`[${rule.name}] ${result.suggestion}`);
+    } else {
+      aiError = ai.error;
+      for (const id of Object.keys(AI_CHECK_NAMES) as Array<keyof AiChecks>) {
+        checks[id] = PASS(`⏭️ ${AI_CHECK_NAMES[id]} — ไม่ได้ตรวจ (ตัวตรวจ AI ไม่พร้อม)`);
       }
     }
 
-    return report;
+    // คำต้องห้ามของแบรนด์ — กฎในโค้ด, block และมีผลเหนือผล AI ด้าน consistency
+    const forbidden = findForbiddenWords(content, context?.forbiddenWords);
+    if (forbidden.length > 0) {
+      checks.consistency = {
+        passed: false,
+        severity: 'error',
+        message: `❌ ใช้คำต้องห้ามของแบรนด์: ${forbidden.join(', ')}`,
+        suggestion: `ห้ามใช้คำเหล่านี้: ${forbidden.join(', ')}`,
+      };
+    }
+
+    const results = Object.entries(checks) as Array<[GuardCheckId, ValidationResult]>;
+    const blocked = results.filter(([, r]) => !r.passed && r.severity === 'error');
+    const warned = results.filter(([, r]) => r.severity === 'warning');
+
+    return {
+      contentId,
+      timestamp: new Date().toISOString(),
+      checks,
+      overallStatus: blocked.length > 0 ? 'blocked' : warned.length > 0 ? 'warning' : 'passed',
+      recommendations: [...blocked, ...warned].map(([, r]) => r.suggestion || r.message),
+      blockReasons: blocked.map(([, r]) => r.suggestion || r.message),
+      aiChecked,
+      aiError,
+    };
   }
 
   generateReport(report: DataGuardReport): string {
     const lines = [
       `📋 Data Guard Report — ${report.timestamp}`,
-      `Status: ${report.overallStatus.toUpperCase()}`,
+      `Status: ${report.overallStatus.toUpperCase()}${report.aiChecked ? '' : ' (AI checks unavailable)'}`,
       '',
       '🔍 Checks:',
     ];
-
-    for (const [, result] of Object.entries(report.checks)) {
-      const r = result as ValidationResult;
-      const icon = r.passed ? '✅' : r.severity === 'error' ? '❌' : '⚠️';
-      lines.push(`${icon} ${r.message}`);
-    }
-
+    for (const r of Object.values(report.checks)) lines.push(`   ${r.message}`);
     if (report.recommendations.length > 0) {
       lines.push('', '💡 Recommendations:');
       report.recommendations.forEach(rec => lines.push(`   • ${rec}`));
     }
-
     return lines.join('\n');
   }
 }

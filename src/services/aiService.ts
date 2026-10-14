@@ -3,16 +3,17 @@
  *
  * หน้าที่หลัก:
  * 1. buildContextMessage() — inject ข้อมูล brand ครบทุกฟิลด์
- * 2. callClaudeAPI() — call API เท่านั้น
+ * 2. callClaudeAPI() — call /api/anthropic เท่านั้น (model/max_tokens กำหนดฝั่ง server)
  * 3. ส่งต่อ orchestratorEngine.processAndDeliver() ทำงานต่อทั้งหมด
  *    (Guard loop, saveMessage, extractOutputs, badge)
+ * 4. ถ้า Claude ตอบไม่ได้ → แจ้ง error ตามสาเหตุจริง ไม่ผ่าน Guard และไม่ติดป้ายผลตรวจ
  *
  * ไม่มี Guard logic ใน aiService อีกต่อไป
  */
 
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
-import { orchestratorEngine } from './orchestratorEngine';
+import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
 import { databaseService, MessageRecord } from './databaseService';
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
@@ -31,7 +32,11 @@ const RANGER_TO_AGENT: Record<string, string> = {
 
 export interface SendMessageResponse {
   text: string;
-  confidence: number;
+  /** ไม่มีค่าแล้ว — เดิมเป็นเลข 95 ที่เขียนตายตัว ไม่ได้วัดจากอะไร */
+  confidence?: number;
+  /** false เมื่อ Claude ตอบไม่ได้ (text เป็นข้อความแจ้ง error) */
+  ok: boolean;
+  factCheckResult?: { valid: boolean; violations: string[]; warnings: string[] };
   outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
 }
 
@@ -46,9 +51,35 @@ export interface ProcessMessageResponse {
   content: string;
   agentId: string;
   agentName: string;
-  confidence: number;
+  confidence?: number;
   factCheckResult: { valid: boolean; violations: string[]; warnings: string[] };
   outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
+}
+
+export class ClaudeApiError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+    this.name = 'ClaudeApiError';
+  }
+}
+
+const API_ERROR_PREFIX = '⚠️ ยังตอบไม่ได้ในขณะนี้';
+
+/** ข้อความแจ้งผู้ใช้เมื่อเรียก Claude ไม่สำเร็จ — บอกสาเหตุจริง ไม่ใช่คำตอบปลอม */
+export function buildApiErrorMessage(code: string): string {
+  const reasons: Record<string, string> = {
+    rate_limited: 'คุณส่งข้อความถี่เกินไป กรุณารอสักครู่แล้วลองใหม่ค่ะ',
+    upstream_rate_limited: 'ระบบ AI มีผู้ใช้งานหนาแน่น กรุณาลองใหม่ในอีกสักครู่ค่ะ',
+    overloaded: 'ระบบ AI ไม่พร้อมชั่วคราว กรุณาลองใหม่ในอีกสักครู่ค่ะ',
+    timeout: 'ระบบ AI ตอบช้าเกินกำหนด กรุณาลองใหม่ หรือถามให้สั้นลงค่ะ',
+    auth: 'ระบบยังเชื่อมต่อ AI ไม่ได้ (API key ไม่ถูกต้อง) กรุณาแจ้งทีมงานค่ะ',
+    billing: 'ระบบยังเชื่อมต่อ AI ไม่ได้ (เครดิต API หมด) กรุณาแจ้งทีมงานค่ะ',
+    not_configured: 'ระบบยังไม่ได้ตั้งค่า API key กรุณาแจ้งทีมงานค่ะ',
+    invalid_request: 'ข้อความหรือไฟล์แนบมีรูปแบบที่ระบบไม่รองรับ (อาจยาวหรือใหญ่เกินไป) กรุณาลองใหม่ค่ะ',
+    refusal: 'AI ไม่สามารถตอบคำถามนี้ได้ ลองปรับคำถามใหม่ค่ะ',
+    empty: 'AI ไม่ได้ส่งคำตอบกลับมา กรุณาลองใหม่ค่ะ',
+  };
+  return `${API_ERROR_PREFIX}\n\n${reasons[code] || 'เกิดข้อผิดพลาดในการเชื่อมต่อระบบ AI กรุณาลองใหม่ค่ะ'}`;
 }
 
 class AIService {
@@ -95,8 +126,10 @@ class AIService {
     }
 
     // ── build context + messages ───────────────────────────────────────────
+    // ข้อมูลแบรนด์อยู่ใน system prompt ที่เดียว (เดิมส่งซ้ำในข้อความแรกด้วย)
     const contextMsg = this.buildContextMessage(agent, ctx);
-    const messages = this.buildMessages(agentId, text, contextMsg, history, attachments);
+    const system = `${agent.systemPrompt}\n\n---\n${contextMsg}`;
+    const messages = this.buildMessages(text, history, attachments);
 
     // ── Gate 1: validate input ─────────────────────────────────────────────
     const inputValidation = orchestratorEngine.validate(agentId, text);
@@ -110,10 +143,12 @@ class AIService {
     // ── Call Claude ────────────────────────────────────────────────────────
     let rawResponse: string;
     try {
-      rawResponse = await this.callClaudeAPI(agent, messages, contextMsg);
+      rawResponse = await this.callClaudeAPI(system, messages);
     } catch (err: any) {
-      console.error('[AIService] callClaudeAPI failed:', err.message);
-      rawResponse = this.buildFallbackResponse(agentId, text, ctx);
+      const code = err instanceof ClaudeApiError ? err.code : 'network';
+      console.error('[AIService] callClaudeAPI failed:', code, err?.message);
+      // ไม่ส่งเข้า Guard และไม่ติดป้าย — ผู้ใช้ต้องรู้ว่า AI ไม่ได้ตอบ
+      return { text: buildApiErrorMessage(code), ok: false, outputs: [] };
     }
 
     // ── ส่งต่อ Orchestrator ทำงานต่อทั้งหมด ───────────────────────────────
@@ -126,10 +161,8 @@ class AIService {
       context: ctx,
       brandIdNum,
       messages,
-      contextMsg,
-      callClaudeFn: async (retryMessages, retryContextMsg) => {
-        return this.callClaudeAPI(agent, retryMessages, retryContextMsg);
-      },
+      originalContent: this.collectOriginalContent(text, attachments),
+      callClaudeFn: (retryMessages) => this.callClaudeAPI(system, retryMessages),
     });
 
     // ── อัปเดต in-memory history ───────────────────────────────────────────
@@ -140,10 +173,19 @@ class AIService {
       { role: 'assistant' as const, content: result.text },
     ].slice(-20));
 
+    const report = result.guardReport;
+    const checks = report ? Object.values(report.checks) : [];
     return {
       text: result.text,
-      confidence: 95,
+      ok: true,
       outputs: result.outputs,
+      factCheckResult: report
+        ? {
+            valid: report.overallStatus !== 'blocked',
+            violations: checks.filter(c => !c.passed && c.severity === 'error').map(c => c.message),
+            warnings: checks.filter(c => c.severity === 'warning').map(c => c.message),
+          }
+        : undefined,
     };
   }
 
@@ -205,9 +247,7 @@ class AIService {
 
   // ── buildMessages ─────────────────────────────────────────────────────────
   private buildMessages(
-    agentId: string,
     userInput: string,
-    contextMsg: string,
     uiHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
     attachments?: Array<{ name: string; type: string; size: number; data?: string }>
   ): Array<{ role: 'user' | 'assistant'; content: any }> {
@@ -216,14 +256,12 @@ class AIService {
     const imageAttachments = attachments?.filter(a => a.type.startsWith('image/') && a.data) || [];
     const textAttachments = attachments?.filter(a => !a.type.startsWith('image/') && a.data) || [];
 
-    const buildUserContent = (text: string, isFirst = false): any => {
-      const base = isFirst ? `${contextMsg}\n\n---\nคำถาม: ${text}` : text;
-
+    const buildUserContent = (text: string): any => {
       if (imageAttachments.length === 0 && textAttachments.length === 0) {
-        return base;
+        return text;
       }
 
-      const contentArr: any[] = [{ type: 'text', text: base }];
+      const contentArr: any[] = [{ type: 'text', text }];
 
       imageAttachments.forEach(att => {
         const base64 = att.data?.split(',')[1] || att.data || '';
@@ -235,82 +273,96 @@ class AIService {
       });
 
       textAttachments.forEach(att => {
-        const rawText = att.data?.split(',').slice(1).join(',') || '';
-        try {
-          const decoded = att.type === 'text/plain' ? atob(rawText) : rawText;
+        const decoded = this.decodeTextAttachment(att);
+        if (decoded !== null) {
           contentArr.push({ type: 'text', text: `\n\n[ไฟล์แนบ: ${att.name}]\n${decoded}` });
-        } catch { /* skip */ }
+        }
       });
 
       return contentArr;
     };
 
-    if (uiHistory.length === 0) {
-      messages.push({ role: 'user', content: buildUserContent(userInput, true) });
-    } else {
-      let valid = [...uiHistory];
+    if (uiHistory.length > 0) {
+      // ตัดป้ายผลตรวจออกจาก history — ไม่ต้องส่งให้ Claude อ่านซ้ำ (ประหยัด token)
+      let valid = uiHistory
+        .map(m => ({ role: m.role, content: m.role === 'assistant' ? stripGuardBadge(m.content) : m.content }))
+        .filter(m => typeof m.content === 'string' && m.content.trim().length > 0)
+        // ข้อความแจ้ง error ไม่ใช่คำตอบจริง — ไม่ส่งกลับเข้า context
+        .filter(m => !(m.role === 'assistant' && m.content.startsWith(API_ERROR_PREFIX)));
       if (valid[0]?.role !== 'user') valid = valid.slice(1);
       const trimmed: typeof valid = [];
       for (const m of valid) {
         const last = trimmed[trimmed.length - 1];
         if (!last || last.role !== m.role) trimmed.push(m);
       }
-      const sliced = trimmed.slice(-10);
+      let sliced = trimmed.slice(-10);
+      if (sliced[0]?.role !== 'user') sliced = sliced.slice(1);
+      // ข้อความถัดไปเป็น user — ถ้า history จบด้วย user ให้ตัดออก (กัน user ซ้อนกัน)
+      if (sliced[sliced.length - 1]?.role === 'user') sliced = sliced.slice(0, -1);
       messages.push(...sliced);
-      messages.push({ role: 'user', content: buildUserContent(userInput) });
     }
+    messages.push({ role: 'user', content: buildUserContent(userInput) });
 
     return messages;
   }
 
-  // ── callClaudeAPI — call API เท่านั้น ────────────────────────────────────
-  async callClaudeAPI(
-    agent: Agent,
-    messages: Array<{ role: 'user' | 'assistant'; content: any }>,
-    contextMsg?: string
-  ): Promise<string> {
-    const model = (import.meta as any).env?.VITE_CLAUDE_MODEL || 'claude-sonnet-4-6';
-
-    const userApiKey = ((import.meta as any).env?.VITE_ANTHROPIC_API_KEY as string | undefined)
-      || (typeof localStorage !== 'undefined' ? localStorage.getItem('socialFactory_anthropicKey') : null);
-    const apiUrl = userApiKey
-      ? 'https://api.anthropic.com/v1/messages'
-      : '/api/anthropic/v1/messages';
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (userApiKey) {
-      headers['x-api-key'] = userApiKey;
-      headers['anthropic-version'] = '2023-06-01';
-      headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  private decodeTextAttachment(att: { type: string; data?: string }): string | null {
+    const rawText = att.data?.split(',').slice(1).join(',') || '';
+    try {
+      if (att.type !== 'text/plain') return rawText;
+      // atob ให้ binary string — แปลงเป็น UTF-8 เพื่อให้ภาษาไทยไม่เพี้ยน
+      const bin = atob(rawText);
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    } catch {
+      return null;
     }
+  }
 
+  /** ข้อความต้นฉบับจากผู้ใช้ (ไฟล์แนบ + ข้อความยาว) สำหรับ Guard ตรวจความคล้าย */
+  private collectOriginalContent(
+    text: string,
+    attachments?: Array<{ name: string; type: string; size: number; data?: string }>
+  ): string {
+    const parts = (attachments || [])
+      .filter(a => !a.type.startsWith('image/') && a.data)
+      .map(a => this.decodeTextAttachment(a))
+      .filter((t): t is string => !!t);
+    if (text.length >= 200) parts.unshift(text);
+    return parts.join('\n\n');
+  }
+
+  // ── callClaudeAPI — call /api/anthropic เท่านั้น ─────────────────────────
+  // API key, model, max_tokens และ web search ถูกกำหนดฝั่ง server (api/anthropic.js)
+  async callClaudeAPI(
+    system: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: any }>
+  ): Promise<string> {
     const controller = new AbortController();
-     const timeout = setTimeout(() => controller.abort(), 90000);
+    const timeout = setTimeout(() => controller.abort(), 90000);
 
     try {
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model,
-          max_tokens: 4096,
-          system: contextMsg
-            ? `${agent.systemPrompt}\n\n---\n${contextMsg}`
-            : agent.systemPrompt,
-          messages,
-          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Claude API ${res.status}: ${err}`);
+      let res: Response;
+      try {
+        res = await fetch('/api/anthropic', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ system, messages }),
+          signal: controller.signal,
+        });
+      } catch (err: any) {
+        throw new ClaudeApiError(err?.name === 'AbortError' ? 'timeout' : 'network', String(err?.message || err));
       }
 
-      const data = await res.json() as any;
-      const textBlocks = data.content?.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') || '';
-      return textBlocks || 'ไม่ได้รับคำตอบ';
+      const data = await res.json().catch(() => null) as any;
+      if (!res.ok) {
+        const code = data?.error?.code || (res.status === 413 ? 'invalid_request' : `http_${res.status}`);
+        throw new ClaudeApiError(code, data?.error?.message || `HTTP ${res.status}`);
+      }
+      if (data?.stopReason === 'refusal') throw new ClaudeApiError('refusal', 'refused');
+      const text = typeof data?.text === 'string' ? data.text.trim() : '';
+      if (!text) throw new ClaudeApiError('empty', `empty response (${data?.stopReason})`);
+      return text;
     } finally {
       clearTimeout(timeout);
     }
@@ -331,22 +383,6 @@ class AIService {
       lastUpdated: new Date().toISOString(),
       isDefault: true,
     } as any;
-  }
-
-  // ── Fallback ──────────────────────────────────────────────────────────────
-  private buildFallbackResponse(agentId: string, input: string, ctx: MasterContext): string {
-    const brand = ctx.brandNameTh || 'แบรนด์ของคุณ';
-    const usps = Array.isArray(ctx.coreUSP) ? ctx.coreUSP.join(', ') : (ctx.coreUSP || 'คุณภาพดี');
-
-    const templates: Record<string, string> = {
-      'brand-builder':    `🏷️ **สร้างแบรนด์สำหรับ ${brand}**\n\nขอถามเพิ่มนิดนึงนะคะ:\n1. ${brand} มีจุดเด่นที่ต่างจากคู่แข่งยังไงคะ?\n2. ลูกค้าหลักเป็นใครคะ?\n\n⚠️ ขณะนี้ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'content-creator':  `✍️ **ไอเดียคอนเทนต์สำหรับ ${brand}**\n\nจุดเด่นที่โพสต์ได้: ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'campaign-planner': `📅 **โครงร่างแคมเปญ ${brand}**\n\n- สัปดาห์ 1: แนะนำตัว\n- สัปดาห์ 2: แสดงจุดเด่น\n- สัปดาห์ 3: ปิดการขาย\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'market-insight':   `🔭 **ภาพรวมตลาด**\n\nจุดแข็ง ${brand}: ${usps}\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-      'advisor':          `💬 ได้รับคำถามแล้วค่ะ: "${input}"\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`,
-    };
-
-    return templates[agentId] || `💬 ได้รับคำถาม: "${input}"\n\n⚠️ ระบบออฟไลน์ชั่วคราว กรุณาตรวจสอบ API Key`;
   }
 
   // ── processMessage (wrapper สำหรับ AgentChat + AgentsGrid) ───────────────
@@ -370,7 +406,7 @@ class AIService {
       agentId,
       agentName: agent.name,
       confidence: result.confidence,
-      factCheckResult: { valid: true, violations: [], warnings: [] },
+      factCheckResult: result.factCheckResult || { valid: result.ok, violations: [], warnings: [] },
       outputs: result.outputs,
     };
   }

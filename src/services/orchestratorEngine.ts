@@ -7,7 +7,7 @@
  * 3. ถ้าเกิน 3 ครั้ง → แจ้ง user + แนะนำทีละ step
  * 4. บันทึก saveMessage() รอผลจริง (ไม่ fire-and-forget)
  * 5. extractOutputs()
- * 6. แนบ badge ✅ ผ่านการตรวจสอบแล้ว
+ * 6. แนบป้ายผลตรวจจริง (buildGuardBadge)
  * 7. ส่งผลสุดท้ายกลับ UI
  *
  * aiService.ts หน้าที่เดียว: call Claude → ส่งต่อมาที่นี่
@@ -16,7 +16,7 @@
 import { Agent, getAllAgents, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { routeToAgent } from '../data/agent-routing';
-import { dataGuardian } from './dataGuardService';
+import { dataGuardian, DataGuardReport } from './dataGuardService';
 import { databaseService, MessageRecord } from './databaseService';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -56,12 +56,11 @@ export interface DeliverParams {
   context: MasterContext;
   brandIdNum: number;
   messages: Array<{ role: 'user' | 'assistant'; content: any }>;
-  contextMsg: string;
+  /** ข้อความต้นฉบับที่ผู้ใช้ส่งมา (ไฟล์แนบ/ข้อความยาว) ใช้ตรวจความคล้าย */
+  originalContent?: string;
   // aiService ส่ง function นี้มาเพื่อให้ orchestrator call Claude ซ้ำได้
-  // โดยไม่ต้องรู้เรื่อง API key
   callClaudeFn: (
-    messages: Array<{ role: 'user' | 'assistant'; content: any }>,
-    contextMsg: string
+    messages: Array<{ role: 'user' | 'assistant'; content: any }>
   ) => Promise<string>;
 }
 
@@ -74,6 +73,27 @@ export interface DeliverResult {
     content: string;
     agentName: string;
   }>;
+  /** ผลตรวจรอบสุดท้าย (null ถ้าตรวจไม่ได้) */
+  guardReport: DataGuardReport | null;
+}
+
+/** ป้ายผลตรวจต่อท้ายคำตอบ — ขึ้นต้นด้วย marker เดียวกันเสมอ เพื่อให้ตัดออกจาก history ได้ */
+export const GUARD_BADGE_MARKER = '\n\n---\n🛡️ ';
+
+export function buildGuardBadge(report: DataGuardReport | null): string {
+  if (!report || !report.aiChecked) {
+    return `${GUARD_BADGE_MARKER}⚠️ ตรวจได้เฉพาะกฎพื้นฐาน — ตัวตรวจ AI ไม่พร้อมในขณะนี้`;
+  }
+  const warnings = Object.values(report.checks)
+    .filter(r => r.severity === 'warning')
+    .map(r => r.suggestion || r.message);
+  if (warnings.length === 0) return `${GUARD_BADGE_MARKER}✅ ผ่านการตรวจ 6 ด้าน`;
+  return `${GUARD_BADGE_MARKER}✅ ผ่านการตรวจ 6 ด้าน — ⚠️ ข้อควรระวัง: ${warnings.join(' / ')}`;
+}
+
+export function stripGuardBadge(text: string): string {
+  const i = text.indexOf(GUARD_BADGE_MARKER);
+  return i === -1 ? text : text.slice(0, i);
 }
 
 // ── Engine ────────────────────────────────────────────────────────────────────
@@ -155,14 +175,16 @@ export class OrchestratorEngine {
   async processAndDeliver(params: DeliverParams): Promise<DeliverResult> {
     const {
       agentId, agentName, userInput, context,
-      brandIdNum, messages, contextMsg, callClaudeFn,
+      brandIdNum, messages, callClaudeFn, originalContent,
     } = params;
 
     let responseText = params.rawResponse;
     let attempt = 0;
     let guardPassed = false;
     let blockReason = '';
+    let guardReport: DataGuardReport | null = null;
 
+    const ctx = context as any;
     const guardContext = {
       brandId: String(context.brandId || 'guest'),
       brandNameTh: context.brandNameTh,
@@ -170,7 +192,10 @@ export class OrchestratorEngine {
         ? context.coreUSP.join(', ')
         : (context.coreUSP || ''),
       toneOfVoice: context.toneOfVoice,
+      targetAudience: context.targetAudience,
+      forbiddenWords: Array.isArray(ctx.forbiddenWords) ? ctx.forbiddenWords : [],
     };
+    const guardMetadata = { originalContent, userInput };
 
     // ── Guard Loop สูงสุด 3 ครั้ง ───────────────────────────────────────────
     while (attempt < 3 && !guardPassed) {
@@ -188,7 +213,7 @@ export class OrchestratorEngine {
         ];
 
         try {
-          responseText = await callClaudeFn(retryMessages, contextMsg);
+          responseText = await callClaudeFn(retryMessages);
         } catch (err) {
           console.error(`[Orchestrator] Retry ${attempt} call failed:`, err);
           break;
@@ -196,15 +221,16 @@ export class OrchestratorEngine {
       }
 
       // ตรวจ Guard
-      const guardReport = await dataGuardian.validateContent(
+      guardReport = await dataGuardian.validateContent(
         guardContext,
-        responseText
+        responseText,
+        guardMetadata
       ).catch(() => null);
 
       if (!guardReport || guardReport.overallStatus !== 'blocked') {
         guardPassed = true;
       } else {
-        blockReason = guardReport.recommendations.join(' | ');
+        blockReason = guardReport.blockReasons.join(' | ');
         console.warn(`[Orchestrator] Guard attempt ${attempt} blocked: ${blockReason}`);
       }
     }
@@ -213,8 +239,7 @@ export class OrchestratorEngine {
     if (!guardPassed) {
       responseText = this.buildUserErrorMessage(blockReason);
     } else {
-      // แนบ badge
-      responseText = responseText + '\n\n---\n✅ ผ่านการตรวจสอบแล้ว';
+      responseText = responseText + buildGuardBadge(guardReport);
     }
 
     // ── บันทึก agent response ลง DB (รอผลจริง) ────────────────────────────
@@ -238,7 +263,7 @@ export class OrchestratorEngine {
     // ── Extract outputs ([WORKFILE] blocks) ────────────────────────────────
     const outputs = this.extractOutputs(responseText, agentName);
 
-    return { text: responseText, outputs };
+    return { text: responseText, outputs, guardReport: guardPassed ? guardReport : null };
   }
 
   // ── buildUserErrorMessage ─────────────────────────────────────────────────
