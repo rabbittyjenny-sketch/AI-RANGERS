@@ -8,7 +8,7 @@ import {
     Building2
 } from 'lucide-react';
 import { getAllAgents } from '../data/agents';
-import { aiService } from '../services/aiService';
+import { aiService, fetchCreditBalance } from '../services/aiService';
 import { databaseService } from '../services/databaseService';
 
 /* ═══════════════════════════════════════════════════
@@ -79,6 +79,18 @@ const renderInline = (text) => {
         return part;
     });
 };
+/* ─── คำอธิบายการหักเครดิต (ส่วนขยาย) ─── */
+const CreditInfoPanel = ({ limit = 30 }) => (
+    <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.7, background: 'rgba(94,155,235,0.07)', borderRadius: 12, padding: '9px 13px', margin: '2px 6px 6px' }}>
+        <div style={{ fontWeight: 700, marginBottom: 3 }}>เครดิตคิดยังไง?</div>
+        <div>• ได้วันละ {limit} เครดิต รีเซ็ตทุกเที่ยงคืน (เวลาไทย) ใช้ไม่หมดไม่สะสม</div>
+        <div>• ส่งข้อความแล้วได้คำตอบ = 1 เครดิต</div>
+        <div>• แนบรูปหรือไฟล์ = 2 เครดิต (AI ต้องอ่านข้อมูลมากขึ้น)</div>
+        <div>• ไม่หักเครดิต: ระบบขัดข้อง, AI ตอบไม่ได้, และรอบที่ระบบตรวจคุณภาพสั่งให้ AI แก้คำตอบเอง</div>
+        <div>• เครดิตผูกกับเบราว์เซอร์/อุปกรณ์ที่ใช้อยู่ ช่วงเปิดทดลองรับผู้ใช้จำนวนจำกัดต่อวัน</div>
+    </div>
+);
+
 const MarkdownText = ({ text }) => {
     if (!text) return null;
     // Strip [WORKFILE:...]...[/WORKFILE] blocks from chat display — they go to Panel 3 only
@@ -516,6 +528,9 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
     });
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [creditBalance, setCreditBalance] = useState(null);
+    const [showCreditInfo, setShowCreditInfo] = useState(false);
+    useEffect(() => { fetchCreditBalance().then(b => { if (b?.enabled) setCreditBalance(b); }); }, []);
     const [error, setError] = useState(null);
     const [isListening, setIsListening] = useState(false);
     const [speechSupported, setSpeechSupported] = useState(false);
@@ -712,7 +727,8 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
             const history = (chatSessions[selectedId] || []).filter(m => m.sender !== 'system').map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
             const ctx = hasBrand ? buildContext(activeBrand) : masterContext;
             const response = await aiService.sendMessage(selectedId, text, history, ctx, attachments);
-            const agentMsg = { id: Date.now() + 1, sender: 'agent', timestamp: new Date(), text: response.text || response, confidence: response.confidence };
+            const agentMsg = { id: Date.now() + 1, sender: 'agent', timestamp: new Date(), text: response.text || response, confidence: response.confidence, credits: response.credits };
+            if (response.credits) setCreditBalance(prev => ({ ...(prev || {}), ...response.credits, enabled: true }));
             if (response.outputs?.length) setOutputs(prev => [...prev, ...response.outputs.filter(o => ['document', 'code', 'report', 'image'].includes(o.type))]);
             setChatSessions(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), agentMsg] }));
         } catch (err) {
@@ -933,6 +949,12 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                                             <div style={{ fontSize: '0.63rem', marginTop: 5, display: 'flex', gap: 7, color: msg.sender === 'user' ? 'rgba(255,255,255,.6)' : '#94a3b8', justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start' }}>
                                                                 <span>{(msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</span>
                                                                 {msg.confidence && msg.confidence < 100 && <span>🎯 {Math.round(msg.confidence <= 1 ? msg.confidence * 100 : msg.confidence)}%</span>}
+                                                                {msg.credits?.cost > 0 && (
+                                                                    <button type="button" onClick={() => setShowCreditInfo(v => !v)} title="เครดิตคิดยังไง?"
+                                                                        style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'inherit', fontSize: 'inherit' }}>
+                                                                        ใช้ {msg.credits.cost} เครดิต · เหลือ {msg.credits.remaining} วันนี้ ⓘ
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -989,7 +1011,15 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                             <div style={{ background: BG, borderRadius: 30, ...NEU.raised, padding: '8px 10px 10px' }}>
                                 {/* Top label row */}
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 10px 2px' }}>
-                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Input Command</span>
+                                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.07em' }}>
+                                        <span style={{ textTransform: 'uppercase' }}>Input Command</span>
+                                        {creditBalance && (
+                                            <button type="button" onClick={() => setShowCreditInfo(v => !v)} title="เครดิตคิดยังไง?"
+                                                style={{ marginLeft: 8, border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontSize: '0.66rem', fontWeight: 600, color: creditBalance.remaining > 0 ? '#64748b' : '#ef4444', letterSpacing: 0 }}>
+                                                · เครดิตวันนี้ {creditBalance.remaining}/{creditBalance.limit} ⓘ
+                                            </button>
+                                        )}
+                                    </span>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                                         <button type="button" onClick={() => attachments.length < 5 ? fileInputRef.current?.click() : setError('แนบได้สูงสุด 5 ไฟล์')}
                                             disabled={isLoading}
@@ -1008,6 +1038,8 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                         )}
                                     </div>
                                 </div>
+
+                                {showCreditInfo && <CreditInfoPanel limit={creditBalance?.limit || 30} />}
 
                                 {/* Textarea */}
                                 <div style={{ background: BG, borderRadius: 15, ...NEU.inset, margin: '3px 4px 5px' }}>
