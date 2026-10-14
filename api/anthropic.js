@@ -8,8 +8,8 @@
  * ANTHROPIC_API_KEY อยู่ฝั่ง server เท่านั้น
  *
  * Env (ตั้งใน Vercel — ทุกตัว optional ยกเว้น ANTHROPIC_API_KEY):
- *   CLAUDE_MODEL          default claude-haiku-5-5
- *   CLAUDE_EFFORT         low | medium | high | none   (default low; none = ไม่ส่ง effort)
+ *   CLAUDE_MODEL          default claude-sonnet-4-6 (โมเดลที่ใช้มาตลอด — Haiku ตอบคุณภาพไม่พอ)
+ *   CLAUDE_EFFORT         low | medium | high | none   (default none = ไม่ส่ง effort เหมือนเดิม)
  *   CHAT_MAX_TOKENS       default 4096
  *   WEB_SEARCH_MAX_USES   default 0 = ปิด (งานของ Ranger เป็นงานเขียน/วางแผน ไม่ต้องค้นเว็บ)
  *   CHAT_RATE_LIMIT       ข้อความต่อ IP ต่อชั่วโมง, default 40 (0 = ไม่จำกัด)
@@ -132,7 +132,7 @@ export function buildChatRequest(system, messages) {
     messages: cachedMessages,
   };
 
-  const effort = process.env.CLAUDE_EFFORT || 'low';
+  const effort = process.env.CLAUDE_EFFORT || 'none';
   if (effort !== 'none') request.output_config = { effort };
 
   const searchUses = envInt('WEB_SEARCH_MAX_USES', 0);

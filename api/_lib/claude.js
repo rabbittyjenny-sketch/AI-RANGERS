@@ -11,7 +11,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-export const DEFAULT_CHAT_MODEL = 'claude-haiku-5-5';
+export const DEFAULT_CHAT_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_GUARD_MODEL = 'claude-haiku-5-5';
 
 let client = null;

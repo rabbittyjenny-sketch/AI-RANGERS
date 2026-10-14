@@ -28,8 +28,8 @@ vercel
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | server-side เท่านั้น |
 | `DATABASE_URL` | `postgresql://...` | server-side เท่านั้น (เดิมชื่อ `VITE_DATABASE_URL` — ยังอ่านได้ แต่ให้เปลี่ยนชื่อ) |
 | `ELEVENLABS_API_KEY` | `sk_...` | optional |
-| `CLAUDE_MODEL` | `claude-haiku-5-5` | optional — โมเดลแชท (default Haiku 5.5) |
-| `CLAUDE_EFFORT` | `low` | optional — low / medium / high / none |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | optional — โมเดลแชท (default Sonnet 4.6 — Haiku ตอบคุณภาพไม่พอ) |
+| `CLAUDE_EFFORT` | `none` | optional — low / medium / high / none (none = ไม่ส่ง) |
 | `WEB_SEARCH_MAX_USES` | `0` | optional — ค่าเริ่มต้นปิด web search |
 | `CHAT_RATE_LIMIT` | `40` | optional — ข้อความต่อ IP ต่อชั่วโมง |
 | `GUARD_AI_ENABLED` | `true` | optional — `false` ปิดตัวตรวจ AI ทันที |

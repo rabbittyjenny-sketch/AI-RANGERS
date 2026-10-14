@@ -90,9 +90,9 @@ describe('/api/anthropic', () => {
 
     expect(res.statusCode).toBe(200);
     const sent = create.mock.calls[0][0];
-    expect(sent.model).toBe('claude-haiku-5-5');
+    expect(sent.model).toBe('claude-sonnet-4-6');
     expect(sent.max_tokens).toBe(4096);
-    expect(sent.output_config).toEqual({ effort: 'low' });
+    expect(sent.output_config).toBeUndefined(); // ไม่ส่ง effort เหมือนก่อนหน้า
     expect(sent.tools).toBeUndefined(); // web search ปิดเป็นค่าเริ่มต้น
     expect(sent.temperature).toBeUndefined();
   });
