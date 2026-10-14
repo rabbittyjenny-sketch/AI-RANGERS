@@ -35,7 +35,7 @@ const passChecks = () => ({
 
 function installFetch(chatText: string | string[] = 'คำตอบจากน้อง') {
   const texts = Array.isArray(chatText) ? [...chatText] : [chatText];
-  const fn = vi.fn(async (url: string) => {
+  const fn = vi.fn(async (url: string, _init?: any) => {
     if (url === '/api/guard') return jsonResponse(200, passChecks());
     if (url === '/api/anthropic') {
       const text = texts.length > 1 ? texts.shift()! : texts[0];
