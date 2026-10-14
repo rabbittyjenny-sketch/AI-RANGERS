@@ -5,7 +5,7 @@
  * 1. buildContextMessage() — inject ข้อมูล brand ครบทุกฟิลด์
  * 2. callClaudeAPI() — call /api/anthropic เท่านั้น (model/max_tokens กำหนดฝั่ง server)
  * 3. ส่งต่อ orchestratorEngine.processAndDeliver() ทำงานต่อทั้งหมด
- *    (Guard loop, saveMessage, extractOutputs, badge)
+ *    (Guard loop, extractOutputs, badge) — ไม่เก็บประวัติแชท (มีแค่ log ว่าใช้น้องตัวไหนที่ฝั่ง server)
  * 4. ถ้า Claude ตอบไม่ได้ → แจ้ง error ตามสาเหตุจริง ไม่ผ่าน Guard และไม่ติดป้ายผลตรวจ
  *
  * ไม่มี Guard logic ใน aiService อีกต่อไป
@@ -14,8 +14,8 @@
 import { Agent, getAgentById } from '../data/agents';
 import { MasterContext } from '../data/intelligence';
 import { withSkills } from '../data/rangerSkills';
+import { STANDARD_RULES } from '../data/standardRules';
 import { orchestratorEngine, stripGuardBadge } from './orchestratorEngine';
-import { databaseService, MessageRecord } from './databaseService';
 import { getDeviceId } from './deviceId';
 
 // ── Ranger ID → Agent ID ──────────────────────────────────────────────────────
@@ -53,6 +53,8 @@ export interface SendMessageResponse {
   confidence?: number;
   /** false เมื่อ Claude ตอบไม่ได้ (text เป็นข้อความแจ้ง error) */
   ok: boolean;
+  /** รหัสสาเหตุเมื่อ ok = false เช่น quota_exceeded, daily_user_cap, ip_user_limit, file_limit */
+  errorCode?: string;
   factCheckResult?: { valid: boolean; violations: string[]; warnings: string[] };
   outputs?: Array<{ id: string; type: string; title: string; content: string; agentName: string }>;
 }
@@ -163,29 +165,11 @@ class AIService {
     const agent = getAgentById(agentId);
     if (!agent) throw new Error(`ไม่พบ Ranger: ${rangerId}`);
 
-    // รหัสแบรนด์ฝั่ง browser — server ตรวจว่าเป็นแบรนด์ของเครื่องนี้ก่อนบันทึก
-    const brandKey = ctx.brandId && String(ctx.brandId) !== 'guest' ? String(ctx.brandId) : '';
-
-    // ── บันทึก user message ────────────────────────────────────────────────
-    if (brandKey) {
-      const userMsg: MessageRecord = {
-        brandId: brandKey,
-        role: 'user',
-        agentId,
-        agentName: agent.name,
-        content: text,
-        attachments: attachments?.map(f => ({ name: f.name, type: f.type, size: f.size })),
-        createdAt: new Date(),
-      };
-      // user message บันทึกทันที ไม่รอ
-      databaseService.saveMessage(userMsg).catch(() => {});
-    }
-
     // ── build context + messages ───────────────────────────────────────────
     // ข้อมูลแบรนด์อยู่ใน system prompt ที่เดียว (เดิมส่งซ้ำในข้อความแรกด้วย)
     const contextMsg = this.buildContextMessage(agent, ctx);
     // system prompt คงที่ทุกข้อความ (cache ได้) — ความรู้เฉพาะทางแนบกับข้อความผู้ใช้เฉพาะเมื่อคำถามตรงกับ skill
-    const system = `${agent.systemPrompt}\n\n---\n${contextMsg}`;
+    const system = `${agent.systemPrompt}\n\n${STANDARD_RULES}\n\n---\n${contextMsg}`;
     const messages = this.buildMessages(withSkills(agentId, text), history, attachments);
 
     // ── Gate 1: validate input ─────────────────────────────────────────────
@@ -202,7 +186,7 @@ class AIService {
     let credits: CreditInfo | undefined;
     let turnId: string | undefined;
     try {
-      const first = await this.callClaudeAPI(system, messages);
+      const first = await this.callClaudeAPI(system, messages, undefined, agentId);
       rawResponse = first.text;
       credits = first.credits;
       turnId = first.turnId;
@@ -213,24 +197,24 @@ class AIService {
       return {
         text: buildApiErrorMessage(code),
         ok: false,
+        errorCode: code,
         outputs: [],
         credits: err instanceof ClaudeApiError ? err.credits : undefined,
       };
     }
 
     // ── ส่งต่อ Orchestrator ทำงานต่อทั้งหมด ───────────────────────────────
-    // (Guard loop, saveMessage agent response, extractOutputs, badge)
+    // (Guard loop, extractOutputs, badge)
     const result = await orchestratorEngine.processAndDeliver({
       agentId,
       agentName: agent.name,
       userInput: text,
       rawResponse,
       context: ctx,
-      brandKey,
       messages,
       originalContent: this.collectOriginalContent(text, attachments),
       // รอบที่ Guard สั่งแก้ ส่ง turnId เดิม — server ไม่หักเครดิต
-      callClaudeFn: async (retryMessages) => (await this.callClaudeAPI(system, retryMessages, turnId)).text,
+      callClaudeFn: async (retryMessages) => (await this.callClaudeAPI(system, retryMessages, turnId, agentId)).text,
     });
 
     // ── อัปเดต in-memory history ───────────────────────────────────────────
@@ -409,7 +393,8 @@ class AIService {
   async callClaudeAPI(
     system: string,
     messages: Array<{ role: 'user' | 'assistant'; content: any }>,
-    turnId?: string
+    turnId?: string,
+    agent?: string
   ): Promise<{ text: string; credits?: CreditInfo; turnId?: string }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90000);
@@ -420,7 +405,7 @@ class AIService {
         res = await fetch('/api/anthropic', {
           method: 'POST',
           headers: apiHeaders(),
-          body: JSON.stringify(turnId ? { system, messages, turnId } : { system, messages }),
+          body: JSON.stringify({ system, messages, ...(turnId ? { turnId } : {}), ...(agent ? { agent } : {}) }),
           signal: controller.signal,
         });
       } catch (err: any) {

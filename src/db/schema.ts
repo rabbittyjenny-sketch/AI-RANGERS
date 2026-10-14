@@ -102,21 +102,7 @@ export const designAssets = pgTable('design_assets', {
 
 export type DesignAsset = InferSelectModel<typeof designAssets>;
 
-// Chat Messages Table - Conversation history
-export const messages = pgTable('ranger_messages', {
-  id: serial('id').primaryKey(),
-  brandId: integer('brand_id').notNull().references(() => brands.id, { onDelete: 'cascade' }),
-  role: varchar('role', { length: 20 }).notNull(), // 'user' or 'agent'
-  agentId: varchar('agent_id', { length: 100 }),
-  agentName: varchar('agent_name', { length: 255 }),
-  content: text('content').notNull(),
-  attachments: jsonb('attachments'), // Array of file metadata
-  confidence: integer('confidence'),
-  validationResults: jsonb('validation_results'), // Anti-copycat, USP grounding, etc.
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-});
-
-export type Message = InferSelectModel<typeof messages>;
+// (ไม่มีตารางประวัติแชท — ระบบไม่เก็บเนื้อหาแชท มีแค่ ranger_usage_log: ใช้น้องตัวไหนกี่ครั้ง)
 
 // Agent Learnings Table - Agent insights and improvements
 export const agentLearnings = pgTable('agent_learnings', {

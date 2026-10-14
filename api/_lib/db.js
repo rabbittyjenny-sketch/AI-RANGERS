@@ -34,7 +34,6 @@ export function setQuery(fn) {
  * สร้างเองครั้งแรกที่ใช้ (IF NOT EXISTS) — ไม่ต้องรัน migration
  */
 export const BRANDS_TABLE = 'ranger_brands';
-export const MESSAGES_TABLE = 'ranger_messages';
 
 const SCHEMA_SQL = [
   `CREATE TABLE IF NOT EXISTS ${BRANDS_TABLE} (
@@ -69,19 +68,6 @@ const SCHEMA_SQL = [
     updated_at timestamp DEFAULT now() NOT NULL,
     UNIQUE (owner_key, client_id)
   )`,
-  `CREATE TABLE IF NOT EXISTS ${MESSAGES_TABLE} (
-    id serial PRIMARY KEY,
-    brand_id integer NOT NULL REFERENCES ${BRANDS_TABLE}(id) ON DELETE CASCADE,
-    role varchar(20) NOT NULL,
-    agent_id varchar(100),
-    agent_name varchar(255),
-    content text NOT NULL,
-    attachments jsonb,
-    confidence integer,
-    validation_results jsonb,
-    created_at timestamp DEFAULT now() NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS ${MESSAGES_TABLE}_brand_created_idx ON ${MESSAGES_TABLE} (brand_id, created_at)`,
 ];
 
 export function ensureRangerTables(query) {

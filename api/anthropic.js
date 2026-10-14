@@ -32,6 +32,7 @@ import {
   extractText,
   extractSources,
 } from './_lib/claude.js';
+import { logUsage } from './_lib/usage.js';
 import {
   creditConfig,
   getCreditStore,
@@ -244,6 +245,10 @@ export default async function handler(req, res) {
     }
     // ตัวเลขใช้จริงต่อข้อความ (ไม่มีเนื้อหา/ตัวตนผู้ใช้) — ไว้ตรวจต้นทุนจาก Vercel logs
     console.info('[api/anthropic] usage', JSON.stringify({ model: response.model, ...usage, credits: credits?.cost ?? 0, retry: !!retryTurnId }));
+    // นับการใช้งานรายน้อง (ข้อความใหม่ที่ได้คำตอบเท่านั้น — ไม่นับรอบที่ guard สั่งแก้ ไม่นับที่ error/ปฏิเสธ)
+    if (!retryTurnId && text.trim() && response.stop_reason !== 'refusal') {
+      await logUsage({ agent: req.body?.agent, userKey, day });
+    }
     const turnId = credits ? await store.openTurn({ userKey, day }) : undefined;
 
     return res.status(200).json({

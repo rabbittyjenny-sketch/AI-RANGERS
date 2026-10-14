@@ -4,7 +4,6 @@ import postgres from 'postgres';
 import { setQuery } from '../api/_lib/db.js';
 import { resetRateLimits } from '../api/_lib/claude.js';
 import brandsHandler from '../api/brands.js';
-import messagesHandler from '../api/messages.js';
 
 const A = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const B = '1f8fad5b-d9cb-469f-a165-70867728950e';
@@ -72,7 +71,7 @@ describe.runIf(PG_URL)('brands & messages ownership (postgres)', () => {
     expect(r.statusCode).toBe(200);
     expect(r.body.brands).toEqual([]);
     const tables = await sql`SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'ranger_%' ORDER BY 1`;
-    expect(tables.map(t => t.table_name)).toEqual(expect.arrayContaining(['ranger_brands', 'ranger_messages']));
+    expect(tables.map(t => t.table_name)).toEqual(expect.arrayContaining(['ranger_brands']));
     const foreign = await sql`SELECT content FROM messages`;
     expect(foreign.map(m => m.content)).toEqual(['ของแอปอื่น']);
   });
@@ -96,21 +95,11 @@ describe.runIf(PG_URL)('brands & messages ownership (postgres)', () => {
     expect(b.body.brands.map(x => x.brandNameTh)).toEqual(['ของ B']);
   });
 
-  it('only lets an owner write and read messages on their own brand', async () => {
-    const post = (uid, content) => call(messagesHandler, {
-      method: 'POST', uid, body: { brandId: '1791959706078.42', role: 'user', content, agentId: 'content-creator' } });
-    expect((await post(A, 'ข้อความของ A')).statusCode).toBe(200);
-    expect((await post(B, 'ข้อความของ B')).statusCode).toBe(200); // แบรนด์ของ B เอง (client id เดียวกันได้)
-
-    const readA = await call(messagesHandler, { uid: A, url: '/api/messages?brandId=1791959706078.42&limit=10' });
-    expect(readA.body.messages.map(m => m.content)).toEqual(['ข้อความของ A']);
-
-    const stranger = '2f8fad5b-d9cb-469f-a165-70867728950e';
-    expect((await post(stranger, 'แอบเขียน')).statusCode).toBe(404);
-    const readStranger = await call(messagesHandler, { uid: stranger, url: '/api/messages?brandId=1791959706078.42' });
-    expect(readStranger.body.messages).toEqual([]);
-    // ข้อความเราไม่ไปปนในตาราง messages ของแอปอื่น
-    expect((await sql`SELECT count(*)::int AS n FROM messages`)[0].n).toBe(1);
+  it('stores no chat messages at all: there is no ranger_messages table and no /api/messages', async () => {
+    await call(brandsHandler, { uid: A });
+    const t = await sql`SELECT table_name FROM information_schema.tables WHERE table_name = 'ranger_messages'`;
+    expect(t).toHaveLength(0);
+    expect((await sql`SELECT count(*)::int AS n FROM messages`)[0].n).toBe(1); // ของแอปอื่นไม่ถูกแตะ
   });
 
   it('caps brands per owner and rejects incomplete input', async () => {

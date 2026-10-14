@@ -13,6 +13,8 @@ const { default: guardHandler, parseGuardOutput } = await import('../api/guard.j
 const { resetRateLimits, toErrorPayload, isAllowedOrigin } = await import('../api/_lib/claude.js');
 const { setCreditStore, createMemoryStore } = await import('../api/_lib/credits.js');
 const { default: creditsHandler } = await import('../api/credits.js');
+const { setQuery } = await import('../api/_lib/db.js');
+const { normalizeAgent, hashUser, KNOWN_AGENTS } = await import('../api/_lib/usage.js');
 
 function mockRes() {
   const res = { statusCode: 200, body: undefined };
@@ -379,5 +381,75 @@ describe('/api/guard', () => {
     const res = mockRes();
     await guardHandler(mockReq({ content: '  ' }), res);
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('usage log (which Ranger is used) — counts only, never chat content', () => {
+  const UID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const ok = { content: [{ type: 'text', text: 'ตอบลับเฉพาะ' }], stop_reason: 'end_turn', usage: {} };
+  let sqls;
+  beforeEach(() => {
+    sqls = [];
+    setQuery(async (text, params = []) => { sqls.push({ text, params }); return []; });
+  });
+  afterEach(() => setQuery(null));
+
+  async function send(body, headers = { 'x-ranger-user': UID }) {
+    const res = mockRes();
+    await chatHandler(mockReq(body, headers), res);
+    return res;
+  }
+  const inserts = () => sqls.filter(q => /INSERT INTO ranger_usage_log/.test(q.text));
+
+  it('counts one use per answered message for the Ranger that answered', async () => {
+    create.mockResolvedValue(ok);
+    await send({ ...okBody, agent: 'market-insight' });
+    await send({ ...okBody, agent: 'market-insight' });
+    expect(inserts()).toHaveLength(2);
+    const [day, agent, user] = inserts()[0].params;
+    expect(day).toMatch(/^\d{4}-\d\d-\d\d$/);
+    expect(agent).toBe('market-insight');
+    expect(user).toBe(hashUser(`u:${UID}`));
+    expect(user).not.toContain(UID);
+    expect(sqls.some(q => /CREATE TABLE IF NOT EXISTS ranger_usage_log/.test(q.text))).toBe(true);
+  });
+
+  it('never stores what was said or answered', async () => {
+    create.mockResolvedValue(ok);
+    await send({ system: 'ระบบลับ', messages: [{ role: 'user', content: 'ข้อความลับของผู้ใช้' }], agent: 'advisor' });
+    const everything = JSON.stringify(sqls);
+    for (const secret of ['ข้อความลับของผู้ใช้', 'ตอบลับเฉพาะ', 'ระบบลับ', UID]) expect(everything).not.toContain(secret);
+  });
+
+  it('files an unknown or missing Ranger under "other" so nobody can add rows with made-up names', async () => {
+    create.mockResolvedValue(ok);
+    await send({ ...okBody, agent: 'something-made-up' });
+    await send(okBody);
+    expect(inserts().map(q => q.params[1])).toEqual(['other', 'other']);
+    expect(normalizeAgent('brand-builder')).toBe('brand-builder');
+    expect(KNOWN_AGENTS).toHaveLength(6);
+  });
+
+  it('does not count guard retries, refusals or errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    create.mockResolvedValue(ok);
+    const first = await send({ ...okBody, agent: 'advisor' });
+    expect(inserts()).toHaveLength(1);
+    await send({ ...okBody, agent: 'advisor', turnId: first.body.turnId }); // รอบที่ guard สั่งแก้
+    expect(inserts()).toHaveLength(1);
+    create.mockResolvedValueOnce({ content: [], stop_reason: 'refusal', usage: {} });
+    await send({ ...okBody, agent: 'advisor' });
+    create.mockRejectedValueOnce(apiError(Anthropic.InternalServerError));
+    await send({ ...okBody, agent: 'advisor' });
+    expect(inserts()).toHaveLength(1);
+  });
+
+  it('never breaks the chat if the log fails, and is skipped without a database', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    create.mockResolvedValue(ok);
+    setQuery(async () => { throw new Error('db down'); });
+    expect((await send({ ...okBody, agent: 'advisor' })).statusCode).toBe(200);
+    setQuery(null);
+    expect((await send({ ...okBody, agent: 'advisor' })).statusCode).toBe(200);
   });
 });

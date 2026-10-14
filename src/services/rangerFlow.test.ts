@@ -1,12 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('./databaseService', () => ({
-  databaseService: { saveMessage: vi.fn().mockResolvedValue(undefined) },
-}));
-
 import { aiService } from './aiService';
 import { GUARD_BADGE_MARKER } from './orchestratorEngine';
 import { RANGER_SKILLS } from '../data/rangerSkills';
+import { STANDARD_RULES } from '../data/standardRules';
 import { getAllAgents, getAgentById } from '../data/agents';
 
 /**
@@ -82,6 +79,7 @@ describe('the Ranger the user picks is the one that answers', () => {
     const [{ system }] = calls(f, '/api/anthropic');
     expect(system).toContain(getAgentById(agentId)!.systemPrompt);
     expect(system).toContain(`## คำสั่งสำหรับ ${name}`);
+    expect(system).toContain(STANDARD_RULES); // ข้อห้ามมาตรฐานเหมือนกันทุกตัว
     expect(system).toContain('ร้านกาแฟดี');
     for (const other of UI_RANGERS.filter(r => r.agentId !== agentId)) {
       expect(system, `${name} got ${other.name}'s instructions`).not.toContain(`## คำสั่งสำหรับ ${other.name}`);
@@ -141,11 +139,13 @@ describe('the Ranger the user picks is the one that answers', () => {
 });
 
 describe('every answer passes the guards before it reaches the user', () => {
-  it.each(UI_RANGERS)('$name: Claude first, then the guard on that exact answer, then the user', async ({ uiId }) => {
+  it.each(UI_RANGERS)('$name: Claude first, then the guard on that exact answer, then the user', async ({ uiId, agentId }) => {
     const f = installFetch('ตอบเรื่องกาแฟออร์แกนิกพรีเมียมสำหรับคนทำงาน');
     const r = await aiService.sendMessage(uiId, 'ช่วยหน่อย', [], brandCtx as any);
 
+    // ไม่มีการบันทึกแชทที่ไหนเลย: มีแค่เรียก Claude แล้วตรวจ guard
     expect(f.mock.calls.map(c => c[0])).toEqual(['/api/anthropic', '/api/guard']);
+    expect(calls(f, '/api/anthropic')[0].agent).toBe(agentId);
     expect(calls(f, '/api/guard')[0].content).toBe('ตอบเรื่องกาแฟออร์แกนิกพรีเมียมสำหรับคนทำงาน');
     expect(r.ok).toBe(true);
     expect(r.text.startsWith('ตอบเรื่องกาแฟออร์แกนิกพรีเมียมสำหรับคนทำงาน' + GUARD_BADGE_MARKER)).toBe(true);

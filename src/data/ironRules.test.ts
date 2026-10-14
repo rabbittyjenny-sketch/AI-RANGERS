@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getAgentById, getAllAgents } from './agents';
 import { aiService } from '../services/aiService';
+import { STANDARD_RULES } from './standardRules';
 
 /**
  * กฎเหล็ก/ข้อห้ามของแต่ละน้อง — ตรึงไว้เป็นเทสต์ กันหายโดยไม่รู้ตัวเวลาแก้/รวม/ย้ายชุดคำสั่ง
@@ -94,5 +95,20 @@ describe('rules added to every answer through the brand context', () => {
     const msg: string = (aiService as any).buildContextMessage(getAgentById('advisor')!, { brandNameTh: 'ลูกค้าทั่วไป', isDefault: true, visualStyle: {}, coreUSP: [] });
     expect(msg).toContain('ยังไม่มีข้อมูลแบรนด์ที่สมบูรณ์ — ให้ถามผู้ใช้เพิ่มเติม');
     expect(msg).toContain('อย่าสมมติข้อมูลเอง');
+  });
+});
+
+describe('standard prohibitions (ข้อห้ามมาตรฐาน)', () => {
+  it('lists the shared rules once, in one place', () => {
+    for (const must of ['ห้ามใช้คำต้องห้ามของแบรนด์', 'ห้ามเดา แต่ง หรือประมาณตัวเลข', 'ห้ามถามข้อมูลแบรนด์', 'ห้ามรับประกัน', 'ห้ามวิจารณ์', 'ห้ามเสนอตัวส่งต่อ', 'กฎหมาย ภาษี', 'ห้ามตอบยาวเกินจำเป็น']) {
+      expect(STANDARD_RULES, must).toContain(must);
+    }
+  });
+
+  it('does not replace a Ranger\'s own prohibitions (they are all still in its prompt)', () => {
+    for (const [id, rules] of Object.entries(IRON_RULES)) {
+      const prompt = getAgentById(id)!.systemPrompt;
+      for (const r of rules) expect(prompt, `${id}: ${r}`).toContain(r);
+    }
   });
 });

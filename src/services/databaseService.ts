@@ -1,5 +1,5 @@
 /**
- * Database Service — เรียกผ่าน serverless API เท่านั้น (api/brands.js, api/messages.js)
+ * Database Service — เรียกผ่าน serverless API เท่านั้น (api/brands.js)
  *
  * browser ไม่มี connection string ของฐานข้อมูลอีกต่อไป และเห็นได้เฉพาะแบรนด์/ประวัติแชท
  * ที่ผูกกับรหัสเครื่องของตัวเอง (header X-Ranger-User)
@@ -208,22 +208,16 @@ class DatabaseService {
     return this.lsScan<BrandRecord>('brands_');
   }
 
-  // ── messages ──────────────────────────────────────────────────────────────
+  // ── messages — ไม่เก็บประวัติแชท ──────────────────────────────────────────
+  // ระบบไม่บันทึกเนื้อหาแชทที่ไหนเลย (ทั้งฐานข้อมูลและ localStorage) — เก็บแค่สถิติว่าใช้น้องตัวไหน (ฝั่ง server)
+  // เมธอดคงไว้เพื่อไม่ให้โค้ดเก่าที่เรียกอยู่พัง
 
   async saveMessage(message: MessageRecord): Promise<MessageRecord> {
-    const data = { ...message, createdAt: message.createdAt ?? new Date() };
-    const ok = await this.api<{ ok: boolean }>('/api/messages', { method: 'POST', body: data });
-    if (!ok) this.lsSet(`message_${String(message.brandId)}_${Date.now()}`, data);
-    return data;
+    return { ...message, createdAt: message.createdAt ?? new Date() };
   }
 
-  async getConversationHistory(brandId: number | string, limit = 50): Promise<MessageRecord[]> {
-    const res = await this.api<{ messages: MessageRecord[] }>(
-      `/api/messages?brandId=${encodeURIComponent(String(brandId))}&limit=${limit}`);
-    if (res && res.messages.length > 0) return res.messages;
-    return this.lsScan<MessageRecord>(`message_${String(brandId)}_`)
-      .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime())
-      .slice(-limit);
+  async getConversationHistory(_brandId: number | string, _limit = 50): Promise<MessageRecord[]> {
+    return [];
   }
 
   // ── เก็บในเครื่องเท่านั้น (ยังไม่มี API) ───────────────────────────────────

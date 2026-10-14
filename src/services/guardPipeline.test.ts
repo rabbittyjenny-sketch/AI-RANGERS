@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('./databaseService', () => ({
-  databaseService: { saveMessage: vi.fn().mockResolvedValue(undefined) },
-}));
-
 import { dataGuardian, isolationGuard, antiCopycatGuard, textSimilarity } from './dataGuardService';
 import { orchestratorEngine, GUARD_BADGE_MARKER, stripGuardBadge } from './orchestratorEngine';
 import { aiService, formatSources } from './aiService';
@@ -135,7 +131,6 @@ describe('orchestratorEngine.processAndDeliver', () => {
     agentName: 'Content',
     userInput: 'เขียนโพสต์',
     context: brandCtx as any,
-    brandKey: '',
     messages: [{ role: 'user' as const, content: 'เขียนโพสต์' }],
   };
 
@@ -200,7 +195,8 @@ describe('aiService.sendMessage', () => {
     expect(url).toBe('/api/anthropic');
     expect(init.headers['x-api-key']).toBeUndefined();
     const body = JSON.parse(init.body);
-    expect(Object.keys(body).sort()).toEqual(['messages', 'system']);
+    expect(Object.keys(body).sort()).toEqual(['agent', 'messages', 'system']);
+    expect(body.agent).toBe('content-creator');
     expect(init.headers['X-Ranger-User']).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.system).toContain('ร้านกาแฟดี');
     expect(body.messages).toEqual([{ role: 'user', content: 'เขียนโพสต์' }]);
