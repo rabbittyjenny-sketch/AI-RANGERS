@@ -201,8 +201,37 @@ describe('aiService.sendMessage', () => {
     expect(init.headers['x-api-key']).toBeUndefined();
     const body = JSON.parse(init.body);
     expect(Object.keys(body).sort()).toEqual(['messages', 'system']);
+    expect(init.headers['X-Ranger-User']).toMatch(/^[0-9a-f-]{36}$/);
     expect(body.system).toContain('ร้านกาแฟดี');
     expect(body.messages).toEqual([{ role: 'user', content: 'เขียนโพสต์' }]);
+  });
+
+  it('passes credits through, and sends the turnId on guard retries so they are not charged', async () => {
+    const credits = { cost: 1, used: 1, remaining: 29, limit: 30, resetsAt: '2026-10-14T17:00:00.000Z' };
+    const f = installFetch({
+      chat: [
+        jsonResponse(200, { text: 'ตลาดโต 45%', stopReason: 'end_turn', credits, turnId: 'turn-1' }),
+        jsonResponse(200, { text: 'แก้แล้ว', stopReason: 'end_turn', credits: null }),
+      ],
+      guard: [
+        jsonResponse(200, { checks: aiVerdicts({ factCheck: ['fail', 'แต่งสถิติ'] }) }),
+        jsonResponse(200, { checks: aiVerdicts() }),
+      ],
+    });
+    const r = await aiService.sendMessage('content', 'เขียนโพสต์', [], brandCtx as any);
+    expect(r.credits).toEqual(credits);
+    expect(r.text.startsWith('แก้แล้ว')).toBe(true);
+    const chatBodies = f.mock.calls.filter(c => c[0] === '/api/anthropic').map(c => JSON.parse(c[1].body));
+    expect(chatBodies[0].turnId).toBeUndefined();
+    expect(chatBodies[1].turnId).toBe('turn-1');
+  });
+
+  it('explains a used-up daily quota', async () => {
+    installFetch({ chat: [jsonResponse(429, { error: { code: 'quota_exceeded' }, credits: { cost: 0, used: 30, remaining: 0, limit: 30, resetsAt: 'x' } })] });
+    const r = await aiService.sendMessage('content', 'เขียนโพสต์', [], brandCtx as any);
+    expect(r.ok).toBe(false);
+    expect(r.text).toContain('เครดิตวันนี้ใช้ครบแล้ว');
+    expect(r.credits?.remaining).toBe(0);
   });
 
   it('strips guard badges and error notices from history before resending', async () => {

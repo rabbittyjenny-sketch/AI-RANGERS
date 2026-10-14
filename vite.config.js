@@ -10,12 +10,14 @@ function localApiFunctions(env) {
   const routes = {
     '/api/anthropic': './api/anthropic.js',
     '/api/guard': './api/guard.js',
+    '/api/credits': './api/credits.js',
   }
   return {
     name: 'local-api-functions',
     configureServer(server) {
       for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_EFFORT', 'CHAT_MAX_TOKENS',
-        'WEB_SEARCH_MAX_USES', 'CHAT_RATE_LIMIT', 'GUARD_AI_ENABLED', 'GUARD_MODEL', 'GUARD_RATE_LIMIT', 'ALLOWED_ORIGINS']) {
+        'WEB_SEARCH_MAX_USES', 'CHAT_RATE_LIMIT', 'GUARD_AI_ENABLED', 'GUARD_MODEL', 'GUARD_RATE_LIMIT', 'ALLOWED_ORIGINS',
+        'DAILY_CREDITS', 'DAILY_USER_CAP', 'IP_DAILY_USER_LIMIT', 'CREDITS_ENABLED', 'DATABASE_URL', 'VITE_DATABASE_URL']) {
         if (env[key] !== undefined && process.env[key] === undefined) process.env[key] = env[key]
       }
       server.middlewares.use(async (req, res, next) => {

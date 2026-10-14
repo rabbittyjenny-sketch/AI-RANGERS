@@ -11,9 +11,13 @@
  *   CLAUDE_MODEL          default claude-haiku-5-5
  *   CLAUDE_EFFORT         low | medium | high | none   (default low; none = ไม่ส่ง effort)
  *   CHAT_MAX_TOKENS       default 4096
- *   WEB_SEARCH_MAX_USES   default 2 (0 = ปิด web search)
+ *   WEB_SEARCH_MAX_USES   default 0 = ปิด (งานของ Ranger เป็นงานเขียน/วางแผน ไม่ต้องค้นเว็บ)
  *   CHAT_RATE_LIMIT       ข้อความต่อ IP ต่อชั่วโมง, default 40 (0 = ไม่จำกัด)
  *   ALLOWED_ORIGINS       origin เพิ่มเติมที่อนุญาต คั่นด้วย comma
+ *   DAILY_CREDITS / DAILY_USER_CAP / IP_DAILY_USER_LIMIT / CREDITS_ENABLED — ดู api/_lib/credits.js
+ *
+ * เครดิต: ข้อความใหม่หักเครดิตก่อนเรียก Claude (คืนให้ถ้า error) แล้วตอบ turnId กลับไป
+ * รอบที่ Guard สั่งให้เขียนใหม่ ส่ง turnId เดิมมา — ไม่หักเครดิต (สูงสุด 2 รอบต่อ turn)
  */
 
 import {
@@ -27,6 +31,20 @@ import {
   sendError,
   extractText,
 } from './_lib/claude.js';
+import {
+  creditConfig,
+  getCreditStore,
+  bangkokDay,
+  nextResetIso,
+  creditCost,
+  userKeyFrom,
+} from './_lib/credits.js';
+
+const CREDIT_MESSAGES = {
+  quota_exceeded: 'เครดิตวันนี้หมดแล้ว จะรีเซ็ตตอนเที่ยงคืน',
+  daily_user_cap: 'วันนี้มีผู้ใช้งานเต็มจำนวนแล้ว',
+  ip_user_limit: 'เครือข่ายนี้มีผู้ใช้งานครบจำนวนแล้ววันนี้',
+};
 
 const MAX_MESSAGES = 30;
 const MAX_SYSTEM_CHARS = 30000;
@@ -117,7 +135,7 @@ export function buildChatRequest(system, messages) {
   const effort = process.env.CLAUDE_EFFORT || 'low';
   if (effort !== 'none') request.output_config = { effort };
 
-  const searchUses = envInt('WEB_SEARCH_MAX_USES', 2);
+  const searchUses = envInt('WEB_SEARCH_MAX_USES', 0);
   if (searchUses > 0) {
     request.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: searchUses }];
   }
@@ -141,6 +159,35 @@ export default async function handler(req, res) {
   const parsed = validateChatBody(req.body);
   if (!parsed.ok) return sendError(res, 400, 'invalid_request', parsed.message);
 
+  // ── เครดิต ───────────────────────────────────────────────────────────────
+  const cfg = creditConfig();
+  const day = bangkokDay();
+  const userKey = userKeyFrom(req);
+  const ip = clientIp(req);
+  const retryTurnId = typeof req.body?.turnId === 'string' ? req.body.turnId : null;
+  let store = null;
+  let charged = 0;
+  let credits = null;
+
+  if (cfg.enabled) {
+    store = await getCreditStore();
+    if (retryTurnId) {
+      const allowed = await store.useTurnRetry({ turnId: retryTurnId, userKey, day, cfg });
+      if (!allowed) return sendError(res, 429, 'retry_not_allowed', 'ไม่สามารถสร้างคำตอบใหม่ได้');
+    } else {
+      const cost = creditCost(parsed.messages);
+      const r = await store.reserve({ userKey, ip, cost, day, cfg });
+      if (!r.ok) {
+        return res.status(429).json({
+          error: { code: r.reason, message: CREDIT_MESSAGES[r.reason] },
+          credits: { cost: 0, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() },
+        });
+      }
+      charged = cost;
+      credits = { cost, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() };
+    }
+  }
+
   const request = buildChatRequest(parsed.system, parsed.messages);
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, web_search_requests: 0 };
 
@@ -163,13 +210,23 @@ export default async function handler(req, res) {
       request.messages = [...request.messages, { role: 'assistant', content: response.content }];
     }
 
+    // ไม่ได้คำตอบที่ใช้ได้ (ปฏิเสธ/ว่าง) — คืนเครดิต
+    if (charged && (response.stop_reason === 'refusal' || !text.trim())) {
+      await store.refund({ userKey, cost: charged, day });
+      credits = null;
+    }
+    const turnId = credits ? await store.openTurn({ userKey, day }) : undefined;
+
     return res.status(200).json({
       text,
       stopReason: response.stop_reason,
       model: response.model,
       usage,
+      credits,
+      turnId,
     });
   } catch (err) {
+    if (charged) await store.refund({ userKey, cost: charged, day }).catch(() => {});
     const e = toErrorPayload(err);
     console.error('[api/anthropic]', e.code, err?.status, String(err?.message || '').slice(0, 300));
     return sendError(res, e.status, e.code, e.message);

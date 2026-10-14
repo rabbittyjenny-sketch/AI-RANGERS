@@ -11,6 +11,8 @@ vi.mock('../api/_lib/claude.js', async (importOriginal) => {
 const { default: chatHandler, buildChatRequest, validateChatBody } = await import('../api/anthropic.js');
 const { default: guardHandler, parseGuardOutput } = await import('../api/guard.js');
 const { resetRateLimits, toErrorPayload, isAllowedOrigin } = await import('../api/_lib/claude.js');
+const { setCreditStore, createMemoryStore } = await import('../api/_lib/credits.js');
+const { default: creditsHandler } = await import('../api/credits.js');
 
 function mockRes() {
   const res = { statusCode: 200, body: undefined };
@@ -33,12 +35,14 @@ function apiError(Cls, message = 'err') {
 }
 
 const ENV_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_EFFORT', 'CHAT_MAX_TOKENS', 'WEB_SEARCH_MAX_USES',
-  'CHAT_RATE_LIMIT', 'GUARD_AI_ENABLED', 'GUARD_MODEL', 'ALLOWED_ORIGINS'];
+  'CHAT_RATE_LIMIT', 'GUARD_AI_ENABLED', 'GUARD_MODEL', 'ALLOWED_ORIGINS',
+  'DAILY_CREDITS', 'DAILY_USER_CAP', 'IP_DAILY_USER_LIMIT', 'CREDITS_ENABLED'];
 
 beforeEach(() => {
   for (const k of ENV_KEYS) delete process.env[k];
   process.env.ANTHROPIC_API_KEY = 'sk-test';
   resetRateLimits();
+  setCreditStore(createMemoryStore());
   create.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
@@ -89,7 +93,7 @@ describe('/api/anthropic', () => {
     expect(sent.model).toBe('claude-haiku-5-5');
     expect(sent.max_tokens).toBe(4096);
     expect(sent.output_config).toEqual({ effort: 'low' });
-    expect(sent.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]);
+    expect(sent.tools).toBeUndefined(); // web search ปิดเป็นค่าเริ่มต้น
     expect(sent.temperature).toBeUndefined();
   });
 
@@ -107,12 +111,12 @@ describe('/api/anthropic', () => {
   it('respects env overrides', () => {
     process.env.CLAUDE_MODEL = 'claude-sonnet-5-5';
     process.env.CLAUDE_EFFORT = 'none';
-    process.env.WEB_SEARCH_MAX_USES = '0';
+    process.env.WEB_SEARCH_MAX_USES = '3';
     process.env.CHAT_MAX_TOKENS = '2000';
     const req = buildChatRequest('SYS', [{ role: 'user', content: 'q' }]);
     expect(req.model).toBe('claude-sonnet-5-5');
     expect(req.output_config).toBeUndefined();
-    expect(req.tools).toBeUndefined();
+    expect(req.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }]);
     expect(req.max_tokens).toBe(2000);
   });
 
@@ -157,6 +161,80 @@ describe('/api/anthropic', () => {
     await chatHandler(mockReq(okBody), res);
     expect(res.statusCode).toBe(502);
     expect(res.body.error.code).toBe('auth');
+  });
+});
+
+describe('daily credits on /api/anthropic', () => {
+  const UID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const ok = { content: [{ type: 'text', text: 'ตอบ' }], stop_reason: 'end_turn', usage: {} };
+  const img = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } };
+
+  async function send(body, headers = { 'x-ranger-user': UID }) {
+    const res = mockRes();
+    await chatHandler(mockReq(body, headers), res);
+    return res;
+  }
+
+  it('charges 1 credit per answered message and 2 with an attachment, returning a turnId', async () => {
+    create.mockResolvedValue(ok);
+    const r1 = await send(okBody);
+    expect(r1.body.credits).toMatchObject({ cost: 1, used: 1, remaining: 29, limit: 30 });
+    expect(typeof r1.body.turnId).toBe('string');
+    const r2 = await send({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'ดูรูป' }, img] }] });
+    expect(r2.body.credits).toMatchObject({ cost: 2, used: 3, remaining: 27 });
+  });
+
+  it('does not charge guard retries that carry a valid turnId, and rejects made-up ones', async () => {
+    create.mockResolvedValue(ok);
+    const first = await send(okBody);
+    const retry = await send({ ...okBody, turnId: first.body.turnId });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.body.credits).toBeNull();
+    expect((await send({ ...okBody, turnId: first.body.turnId })).statusCode).toBe(200);
+    expect((await send({ ...okBody, turnId: first.body.turnId })).statusCode).toBe(429); // เกิน 2 รอบ
+    expect((await send({ ...okBody, turnId: 'made-up' })).body.error.code).toBe('retry_not_allowed');
+
+    const bal = mockRes();
+    await creditsHandler(mockReq(undefined, { 'x-ranger-user': UID }, 'GET'), bal);
+    expect(bal.body).toMatchObject({ enabled: true, used: 1, remaining: 29, limit: 30 });
+  });
+
+  it('refunds when Claude fails or returns nothing', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    create.mockRejectedValueOnce(apiError(Anthropic.InternalServerError));
+    expect((await send(okBody)).statusCode).toBe(503);
+    create.mockResolvedValueOnce({ content: [], stop_reason: 'refusal', usage: {} });
+    expect((await send(okBody)).body.credits).toBeNull();
+    create.mockResolvedValueOnce(ok);
+    expect((await send(okBody)).body.credits.used).toBe(1);
+  });
+
+  it('returns quota_exceeded with the balance once the day is used up', async () => {
+    process.env.DAILY_CREDITS = '2';
+    create.mockResolvedValue(ok);
+    await send(okBody);
+    await send(okBody);
+    const r = await send(okBody);
+    expect(r.statusCode).toBe(429);
+    expect(r.body.error.code).toBe('quota_exceeded');
+    expect(r.body.credits).toMatchObject({ remaining: 0, limit: 2 });
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it('caps distinct users per day', async () => {
+    process.env.DAILY_USER_CAP = '1';
+    create.mockResolvedValue(ok);
+    expect((await send(okBody)).statusCode).toBe(200);
+    const other = await send(okBody, { 'x-ranger-user': '1f8fad5b-d9cb-469f-a165-70867728950e', 'x-forwarded-for': '6.6.6.6' });
+    expect(other.body.error.code).toBe('daily_user_cap');
+  });
+
+  it('can be switched off', async () => {
+    process.env.CREDITS_ENABLED = 'false';
+    create.mockResolvedValue(ok);
+    const r = await send(okBody);
+    expect(r.body.credits).toBeNull();
+    expect(r.body.turnId).toBeUndefined();
   });
 });
 

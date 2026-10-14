@@ -30,8 +30,18 @@ const RANGER_TO_AGENT: Record<string, string> = {
   'advisor':          'advisor',
 };
 
+/** ยอดเครดิตที่ server ส่งกลับ (ไม่มีถ้าปิดระบบเครดิต หรือเป็นรอบ retry) */
+export interface CreditInfo {
+  cost: number;
+  used: number;
+  remaining: number;
+  limit: number;
+  resetsAt: string;
+}
+
 export interface SendMessageResponse {
   text: string;
+  credits?: CreditInfo;
   /** ไม่มีค่าแล้ว — เดิมเป็นเลข 95 ที่เขียนตายตัว ไม่ได้วัดจากอะไร */
   confidence?: number;
   /** false เมื่อ Claude ตอบไม่ได้ (text เป็นข้อความแจ้ง error) */
@@ -57,9 +67,42 @@ export interface ProcessMessageResponse {
 }
 
 export class ClaudeApiError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(public code: string, message: string, public credits?: CreditInfo) {
     super(message);
     this.name = 'ClaudeApiError';
+  }
+}
+
+/** รหัสเครื่อง (สุ่มครั้งแรกแล้วเก็บใน browser) — ใช้นับเครดิตรายวันต่อผู้ใช้ */
+export function getDeviceId(): string | null {
+  try {
+    let id = localStorage.getItem('ranger_uid');
+    if (!id && typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      id = crypto.randomUUID();
+      localStorage.setItem('ranger_uid', id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+function apiHeaders(json = true): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (json) h['Content-Type'] = 'application/json';
+  const id = getDeviceId();
+  if (id) h['X-Ranger-User'] = id;
+  return h;
+}
+
+/** ยอดเครดิตวันนี้ — ใช้แสดงก่อนผู้ใช้ส่งข้อความ */
+export async function fetchCreditBalance(): Promise<(Omit<CreditInfo, 'cost'> & { enabled: boolean }) | null> {
+  try {
+    const res = await fetch('/api/credits', { headers: apiHeaders(false) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
   }
 }
 
@@ -75,6 +118,9 @@ export function buildApiErrorMessage(code: string): string {
     auth: 'ระบบยังเชื่อมต่อ AI ไม่ได้ (API key ไม่ถูกต้อง) กรุณาแจ้งทีมงานค่ะ',
     billing: 'ระบบยังเชื่อมต่อ AI ไม่ได้ (เครดิต API หมด) กรุณาแจ้งทีมงานค่ะ',
     not_configured: 'ระบบยังไม่ได้ตั้งค่า API key กรุณาแจ้งทีมงานค่ะ',
+    quota_exceeded: 'เครดิตวันนี้ใช้ครบแล้ว จะได้เครดิตใหม่ตอนเที่ยงคืน (เวลาไทย) ค่ะ',
+    daily_user_cap: 'ช่วงเปิดทดลอง ระบบรับผู้ใช้จำนวนจำกัดต่อวัน และวันนี้เต็มแล้ว ลองใหม่หลังเที่ยงคืนนะคะ',
+    ip_user_limit: 'เครือข่ายอินเทอร์เน็ตนี้มีผู้ใช้ครบจำนวนต่อวันแล้ว ลองใหม่หลังเที่ยงคืน หรือเปลี่ยนเครือข่ายค่ะ',
     invalid_request: 'ข้อความหรือไฟล์แนบมีรูปแบบที่ระบบไม่รองรับ (อาจยาวหรือใหญ่เกินไป) กรุณาลองใหม่ค่ะ',
     refusal: 'AI ไม่สามารถตอบคำถามนี้ได้ ลองปรับคำถามใหม่ค่ะ',
     empty: 'AI ไม่ได้ส่งคำตอบกลับมา กรุณาลองใหม่ค่ะ',
@@ -142,13 +188,23 @@ class AIService {
 
     // ── Call Claude ────────────────────────────────────────────────────────
     let rawResponse: string;
+    let credits: CreditInfo | undefined;
+    let turnId: string | undefined;
     try {
-      rawResponse = await this.callClaudeAPI(system, messages);
+      const first = await this.callClaudeAPI(system, messages);
+      rawResponse = first.text;
+      credits = first.credits;
+      turnId = first.turnId;
     } catch (err: any) {
       const code = err instanceof ClaudeApiError ? err.code : 'network';
       console.error('[AIService] callClaudeAPI failed:', code, err?.message);
       // ไม่ส่งเข้า Guard และไม่ติดป้าย — ผู้ใช้ต้องรู้ว่า AI ไม่ได้ตอบ
-      return { text: buildApiErrorMessage(code), ok: false, outputs: [] };
+      return {
+        text: buildApiErrorMessage(code),
+        ok: false,
+        outputs: [],
+        credits: err instanceof ClaudeApiError ? err.credits : undefined,
+      };
     }
 
     // ── ส่งต่อ Orchestrator ทำงานต่อทั้งหมด ───────────────────────────────
@@ -162,7 +218,8 @@ class AIService {
       brandIdNum,
       messages,
       originalContent: this.collectOriginalContent(text, attachments),
-      callClaudeFn: (retryMessages) => this.callClaudeAPI(system, retryMessages),
+      // รอบที่ Guard สั่งแก้ ส่ง turnId เดิม — server ไม่หักเครดิต
+      callClaudeFn: async (retryMessages) => (await this.callClaudeAPI(system, retryMessages, turnId)).text,
     });
 
     // ── อัปเดต in-memory history ───────────────────────────────────────────
@@ -178,6 +235,7 @@ class AIService {
     return {
       text: result.text,
       ok: true,
+      credits,
       outputs: result.outputs,
       factCheckResult: report
         ? {
@@ -235,12 +293,14 @@ class AIService {
 
     msg += `\n\n## คำสั่งสำหรับ ${agent.name}`;
     msg += `\n1. ตอบเป็นภาษาไทยเป็นหลัก`;
-    msg += `\n2. ใช้ข้อมูลแบรนด์ด้านบนทุกครั้ง อย่าสมมติข้อมูลเอง`;
-    msg += `\n3. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
-    msg += `\n4. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
-    msg += `\n5. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
-    msg += `\n6. ถ้าค้นหาข้อมูลจากอินเทอร์เน็ต ให้แนบแหล่งที่มาสั้นๆ ท้ายคำตอบ เช่น *ที่มา: Hootsuite 2025* — ไม่ต้องแนบลิงก์`;
-    msg += `\n7. ใช้ web search เมื่อข้อมูลอาจเปลี่ยนแปลงตามเวลาเท่านั้น ไม่จำเป็นต้องค้นทุกคำถาม`;
+    msg += hasRealData
+      ? `\n2. ข้อมูลแบรนด์ด้านบนผู้ใช้กรอกไว้แล้ว ใช้ทุกครั้ง ห้ามถามซ้ำ และอย่าสมมติข้อมูลเอง`
+      : `\n2. ใช้ข้อมูลแบรนด์เท่าที่มี อย่าสมมติข้อมูลเอง`;
+    msg += `\n3. ถ้าคำถามใน "ถามก่อน" ของคุณมีคำตอบอยู่ในข้อมูลแบรนด์แล้ว ให้ข้ามข้อนั้น ถามเฉพาะสิ่งที่งานนี้ต้องใช้แต่ยังไม่มี (เช่น platform, ระยะเวลา) หรือช่องที่เขียนว่า "ไม่ระบุ"`;
+    msg += `\n4. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
+    msg += `\n5. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
+    msg += `\n6. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
+    msg += `\n7. ห้ามแต่งตัวเลขสถิติหรือผลวิจัย ถ้าจะอ้างตัวเลขต้องบอกแหล่งที่มา หรือบอกว่าเป็นการประมาณการ`;
 
     return msg;
   }
@@ -336,8 +396,9 @@ class AIService {
   // API key, model, max_tokens และ web search ถูกกำหนดฝั่ง server (api/anthropic.js)
   async callClaudeAPI(
     system: string,
-    messages: Array<{ role: 'user' | 'assistant'; content: any }>
-  ): Promise<string> {
+    messages: Array<{ role: 'user' | 'assistant'; content: any }>,
+    turnId?: string
+  ): Promise<{ text: string; credits?: CreditInfo; turnId?: string }> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90000);
 
@@ -346,8 +407,8 @@ class AIService {
       try {
         res = await fetch('/api/anthropic', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ system, messages }),
+          headers: apiHeaders(),
+          body: JSON.stringify(turnId ? { system, messages, turnId } : { system, messages }),
           signal: controller.signal,
         });
       } catch (err: any) {
@@ -357,12 +418,12 @@ class AIService {
       const data = await res.json().catch(() => null) as any;
       if (!res.ok) {
         const code = data?.error?.code || (res.status === 413 ? 'invalid_request' : `http_${res.status}`);
-        throw new ClaudeApiError(code, data?.error?.message || `HTTP ${res.status}`);
+        throw new ClaudeApiError(code, data?.error?.message || `HTTP ${res.status}`, data?.credits || undefined);
       }
       if (data?.stopReason === 'refusal') throw new ClaudeApiError('refusal', 'refused');
       const text = typeof data?.text === 'string' ? data.text.trim() : '';
       if (!text) throw new ClaudeApiError('empty', `empty response (${data?.stopReason})`);
-      return text;
+      return { text, credits: data?.credits || undefined, turnId: data?.turnId || undefined };
     } finally {
       clearTimeout(timeout);
     }

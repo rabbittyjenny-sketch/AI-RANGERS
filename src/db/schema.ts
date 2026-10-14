@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, boolean, integer, jsonb, varchar } from 'drizzle-orm/pg-core';
+import { pgTable, text, serial, timestamp, boolean, integer, jsonb, varchar, date, primaryKey } from 'drizzle-orm/pg-core';
 import { InferSelectModel } from 'drizzle-orm';
 
 // Brands Table - Core brand information + Brand Knowledge Template (3 Buckets)
@@ -148,3 +148,23 @@ export const campaignSchedules = pgTable('campaign_schedules', {
 
 export type CampaignSchedule = InferSelectModel<typeof campaignSchedules>;
 
+
+// Daily credits (api/_lib/credits.js) — ใช้ฝั่ง server เท่านั้น
+// serverless function สร้างตารางเองถ้ายังไม่มี; ประกาศไว้ที่นี่เพื่อไม่ให้ `db:push` ลบทิ้ง
+export const rangerCreditUsage = pgTable('ranger_credit_usage', {
+  day: date('day').notNull(),
+  userKey: text('user_key').notNull(),
+  ip: text('ip'),
+  used: integer('used').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.day, t.userKey] }),
+}));
+
+export const rangerCreditTurns = pgTable('ranger_credit_turns', {
+  turnId: text('turn_id').primaryKey(),
+  userKey: text('user_key').notNull(),
+  day: date('day').notNull(),
+  retries: integer('retries').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
