@@ -76,3 +76,15 @@ model / max_tokens / web search ถูกกำหนดฝั่ง server เ�
 - Login / user accounts
 - Chat history ใน Neon (persist ข้ามวัน)
 - 5 Agents เพิ่มเติม (visual, brand voice, ads, automation, analytics)
+
+### ดูสถิติว่าคนใช้น้องตัวไหนมากที่สุด
+ระบบนับการใช้งานรายน้องไว้ในตาราง `ranger_usage_log` (วัน, น้อง, รหัสผู้ใช้แบบแฮช, จำนวนข้อความ) — **ไม่มีเนื้อหาแชท** เปิด SQL Editor ใน Neon แล้วรัน:
+```sql
+SELECT agent_id, sum(messages) AS messages, count(DISTINCT user_hash) AS users
+FROM ranger_usage_log
+WHERE day >= current_date - 7
+GROUP BY agent_id
+ORDER BY messages DESC;
+```
+`other` = ข้อความจากเวอร์ชันเก่าที่ไม่ส่งชื่อน้อง หรือชื่อน้องที่ระบบไม่รู้จัก
+

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import TermsPopup from '../components/TermsPopup';
+import NoticePopup, { NOTICE_KEY } from '../components/NoticePopup';
 import {
     Send, Paperclip, Mic, X, AlertCircle, BookOpen, Check,
     Trash2, LogOut, User, FileText, Copy, Download,
@@ -231,7 +232,7 @@ RangerCard.displayName = 'RangerCard';
 /* ═══════════════════════════════════════════════════
    HOISTED: PAST SESSION ROW (Panel 1)
 ═══════════════════════════════════════════════════ */
-const PastSessionRow = React.memo(({ ranger, messages, isActive, onClick }) => {
+const PastSessionRow = React.memo(({ ranger, messages, isActive, isLoading, onClick }) => {
     const lastUser = [...messages].reverse().find(m => m.sender === 'user');
     const lastTs = messages[messages.length - 1]?.timestamp;
     const timeStr = lastTs ? (lastTs instanceof Date ? lastTs : new Date(lastTs)).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -247,7 +248,7 @@ const PastSessionRow = React.memo(({ ranger, messages, isActive, onClick }) => {
                     <span style={{ fontSize: '0.62rem', color: '#94a3b8', flexShrink: 0 }}>{timeStr}</span>
                 </div>
                 <p style={{ fontSize: '0.68rem', color: '#94a3b8', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.4 }}>
-                    {lastUser?.text?.slice(0, 42) || 'เริ่มบทสนทนา...'}
+                    {isLoading ? '⏳ กำลังตอบ...' : (lastUser?.text?.slice(0, 42) || 'เริ่มบทสนทนา...')}
                 </p>
             </div>
         </motion.button>
@@ -529,7 +530,11 @@ export const Workspace = ({ masterContext, onContextUpdate, currentUser }) => {
         } catch { return {}; }
     });
     const [inputValue, setInputValue] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+    // กำลังรอคำตอบแยกตามน้อง — ส่งข้อความหาน้องตัวอื่นได้ขณะที่อีกตัวยังตอบอยู่
+    const [loadingMap, setLoadingMap] = useState({});
+    const isLoading = !!loadingMap[selectedId];
+    const [softBlock, setSoftBlock] = useState(null); // { code, resetsAt } เมื่อเต็มจำนวนผู้ใช้/เครือข่ายของวัน
+    const [showNotice, setShowNotice] = useState(() => { try { return !sessionStorage.getItem(NOTICE_KEY); } catch { return false; } });
     const [creditBalance, setCreditBalance] = useState(null);
     const [showCreditInfo, setShowCreditInfo] = useState(false);
     useEffect(() => { fetchCreditBalance().then(b => { if (b?.enabled) setCreditBalance(b); }); }, []);
@@ -581,12 +586,37 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
 
     /* past sessions */
     const activeSessions = RANGERS
-        .filter(r => !r.comingSoon && (chatSessions[r.id]?.length || 0) > 1)
+        .filter(r => !r.comingSoon && ((chatSessions[r.id]?.length || 0) > 1 || loadingMap[r.id]))
         .sort((a, b) => {
             const ta = chatSessions[a.id]?.slice(-1)[0]?.timestamp || 0;
             const tb = chatSessions[b.id]?.slice(-1)[0]?.timestamp || 0;
             return new Date(tb) - new Date(ta);
         });
+
+    /* ─── Soft block: เครดิต/โควตาของวันหมด → ส่งไม่ได้ แต่ยังอ่านแชทและส่งออกงานได้ ─── */
+    const creditsOut = !!creditBalance && creditBalance.remaining <= 0;
+    const capBlocked = !!softBlock && (!softBlock.resetsAt || new Date(softBlock.resetsAt).getTime() > Date.now());
+    const blocked = creditsOut || capBlocked;
+    const filesOut = !!creditBalance && creditBalance.filesLimit > 0 && (creditBalance.filesUsed ?? 0) >= creditBalance.filesLimit;
+    const KEEP_NOTE = 'ยังอ่านแชทและส่งออกงานที่ได้ไว้ได้ตามปกติ';
+    const blockMessage = softBlock?.code === 'daily_user_cap'
+        ? `ช่วงเปิดทดลอง วันนี้มีผู้ใช้ครบจำนวนแล้ว ลองใหม่หลังเที่ยงคืน (เวลาไทย) · ${KEEP_NOTE}`
+        : softBlock?.code === 'ip_user_limit'
+            ? `เครือข่ายนี้มีผู้ใช้ครบจำนวนต่อวันแล้ว ลองใหม่หลังเที่ยงคืน (เวลาไทย) หรือเปลี่ยนเครือข่าย · ${KEEP_NOTE}`
+            : `วันนี้ใช้เครดิตครบแล้ว (${creditBalance?.used ?? creditBalance?.limit ?? ''}/${creditBalance?.limit ?? ''}) เครดิตใหม่ตอนเที่ยงคืน (เวลาไทย) · ${KEEP_NOTE}`;
+    const fileMessage = `วันนี้แนบไฟล์ครบ ${creditBalance?.filesLimit ?? ''} ไฟล์แล้ว ส่งข้อความโดยไม่แนบไฟล์ได้ตามปกติ`;
+
+    // ถึงเวลารีเซ็ต (เที่ยงคืนไทย) → ปลดบล็อกและดึงยอดใหม่เอง
+    useEffect(() => {
+        if (!blocked && !filesOut) return undefined;
+        const reset = creditBalance?.resetsAt || softBlock?.resetsAt;
+        const ms = reset ? Math.min(Math.max(new Date(reset).getTime() - Date.now() + 3000, 5000), 6 * 3600 * 1000) : 5 * 60 * 1000;
+        const t = setTimeout(() => {
+            setSoftBlock(null);
+            fetchCreditBalance().then(b => { if (b?.enabled) setCreditBalance(b); });
+        }, ms);
+        return () => clearTimeout(t);
+    }, [blocked, filesOut, creditBalance?.resetsAt, softBlock?.resetsAt]);
 
     /* ─── Effects ─── */
     useEffect(() => {
@@ -717,13 +747,14 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
     /* ─── Send ─── */
     const handleSend = async (e) => {
         e?.preventDefault();
-        if ((!inputValue.trim() && attachments.length === 0) || !selectedId || isLoading) return;
+        if ((!inputValue.trim() && attachments.length === 0) || !selectedId || isLoading || blocked) return;
         const text = inputValue.trim();
         setInputValue(''); setError(null);
         const userMsg = { id: Date.now(), sender: 'user', text, timestamp: new Date(), attachments: attachments.map(a => ({ name: a.name, type: a.type })) };
         setChatSessions(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), userMsg] }));
         setAttachments([]); setPreviewUrls({});
-        setIsLoading(true);
+        const rid = selectedId;
+        setLoadingMap(m => ({ ...m, [rid]: true }));
         if (textareaRef.current) textareaRef.current.style.height = 'auto';
         try {
             const history = (chatSessions[selectedId] || []).filter(m => m.sender !== 'system').map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
@@ -731,12 +762,15 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
             const response = await aiService.sendMessage(selectedId, text, history, ctx, attachments);
             const agentMsg = { id: Date.now() + 1, sender: 'agent', timestamp: new Date(), text: response.text || response, confidence: response.confidence, credits: response.credits };
             if (response.credits) setCreditBalance(prev => ({ ...(prev || {}), ...response.credits, enabled: true }));
+            if (response.ok === false && (response.errorCode === 'daily_user_cap' || response.errorCode === 'ip_user_limit')) {
+                setSoftBlock({ code: response.errorCode, resetsAt: response.credits?.resetsAt || new Date(Date.now() + 3600 * 1000).toISOString() });
+            }
             if (response.outputs?.length) setOutputs(prev => [...prev, ...response.outputs.filter(o => ['document', 'code', 'report', 'image'].includes(o.type))]);
             setChatSessions(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), agentMsg] }));
         } catch (err) {
             setError(err.message || 'เกิดข้อผิดพลาด');
             setChatSessions(prev => ({ ...prev, [selectedId]: [...(prev[selectedId] || []), { id: Date.now() + 1, sender: 'agent', text: `⚠️ ${err.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่'}`, timestamp: new Date(), isError: true }] }));
-        } finally { setIsLoading(false); }
+        } finally { setLoadingMap(m => { const n = { ...m }; delete n[rid]; return n; }); }
     };
 
     const handleKeyDown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } };
@@ -760,6 +794,7 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
         <>
             <FontLoader />
         {showTerms && <TermsPopup onAccept={() => setShowTerms(false)} />}
+        {!showTerms && showNotice && <NoticePopup onClose={() => setShowNotice(false)} />}
             <style>{`
         @keyframes rangerpulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.55;transform:scale(1.2)} }
         @keyframes typingdot   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
@@ -835,6 +870,7 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                         <PastSessionRow key={ranger.id} ranger={ranger}
                                             messages={chatSessions[ranger.id] || []}
                                             isActive={ranger.id === selectedId}
+                                            isLoading={!!loadingMap[ranger.id]}
                                             onClick={() => handleSelectRanger(ranger)} />
                                     ))}
                                 </div>
@@ -1024,7 +1060,7 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                     </span>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                                         <button type="button" onClick={() => attachments.length < 5 ? fileInputRef.current?.click() : setError('แนบได้สูงสุด 5 ไฟล์')}
-                                            disabled={isLoading}
+                                            disabled={isLoading || blocked || filesOut} title={filesOut ? fileMessage : undefined}
                                             style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, border: 'none', background: BG, cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', ...NEU.raisedXs, position: 'relative' }}>
                                             <Paperclip size={11} /> Attach
                                             {attachments.length > 0 && <span style={{ position: 'absolute', top: -3, right: -3, width: 13, height: 13, borderRadius: '50%', background: '#5E9BEB', color: '#fff', fontSize: 8, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{attachments.length}</span>}
@@ -1043,12 +1079,18 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
 
                                 {showCreditInfo && <CreditInfoPanel limit={creditBalance?.limit || 30} filesLimit={creditBalance?.filesLimit || 3} />}
 
+                                {(blocked || filesOut) && (
+                                    <div role="status" style={{ margin: '2px 6px 6px', padding: '9px 13px', borderRadius: 12, fontSize: '0.74rem', lineHeight: 1.7, color: '#92400e', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                                        {blocked ? `ℹ️ ${blockMessage}` : `📎 ${fileMessage}`}
+                                    </div>
+                                )}
+
                                 {/* Textarea */}
                                 <div style={{ background: BG, borderRadius: 15, ...NEU.inset, margin: '3px 4px 5px' }}>
                                     <textarea ref={textareaRef} value={inputValue}
                                         onChange={e => { setInputValue(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 118) + 'px'; }}
-                                        onKeyDown={handleKeyDown} disabled={isLoading || !selectedId} rows={1}
-                                        placeholder={isListening ? '🎙 กำลังฟัง...' : selectedRanger ? `บอก${selectedRanger.name}ว่าต้องการอะไร...` : 'เลือก Ranger ก่อนพิมพ์...'}
+                                        onKeyDown={handleKeyDown} disabled={isLoading || !selectedId || blocked} rows={1}
+                                        placeholder={blocked ? 'ส่งข้อความไม่ได้ในตอนนี้ (ดูข้อความด้านบน)' : isListening ? '🎙 กำลังฟัง...' : selectedRanger ? `บอก${selectedRanger.name}ว่าต้องการอะไร...` : 'เลือก Ranger ก่อนพิมพ์...'}
                                         style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', padding: '9px 13px', fontSize: '0.83rem', color: '#334155', resize: 'none', maxHeight: 118, lineHeight: 1.65, boxSizing: 'border-box', fontFamily: "'Noto Sans Thai','Sarabun',system-ui,sans-serif" }} />
                                 </div>
 
@@ -1064,13 +1106,13 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                         </button>
                                     )}
                                     <motion.button onClick={handleSend}
-                                        disabled={isLoading || (!inputValue.trim() && attachments.length === 0) || !selectedId}
+                                        disabled={isLoading || blocked || (!inputValue.trim() && attachments.length === 0) || !selectedId}
                                         whileTap={{ scale: 0.96 }}
                                         style={{
                                             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 16px', borderRadius: 24, border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, color: '#fff',
                                             background: 'linear-gradient(135deg,#5E9BEB 0%,#6C63FF 100%)',
                                             boxShadow: '3px 3px 10px rgba(94,155,235,0.4), -2px -2px 6px rgba(255,255,255,0.8)',
-                                            opacity: (isLoading || (!inputValue.trim() && attachments.length === 0) || !selectedId) ? 0.44 : 1
+                                            opacity: (isLoading || blocked || (!inputValue.trim() && attachments.length === 0) || !selectedId) ? 0.44 : 1
                                         }}>
                                         <Send size={14} /> Create →
                                     </motion.button>
