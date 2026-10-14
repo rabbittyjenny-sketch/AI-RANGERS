@@ -6,12 +6,12 @@
  */
 
 import { isAllowedOrigin, sendError, clientIp, takeRateLimit } from './_lib/claude.js';
-import { getQuery, ensureBrandOwnership, ownerKeyFrom, str, readBody } from './_lib/db.js';
+import { getQuery, ensureRangerTables, BRANDS_TABLE, MESSAGES_TABLE, ownerKeyFrom, str, readBody } from './_lib/db.js';
 
 const MAX_CONTENT = 50000;
 
 async function ownedBrandId(query, ownerKey, clientId) {
-  const rows = await query('SELECT id FROM brands WHERE owner_key = $1 AND client_id = $2', [ownerKey, clientId]);
+  const rows = await query(`SELECT id FROM ${BRANDS_TABLE} WHERE owner_key = $1 AND client_id = $2`, [ownerKey, clientId]);
   return rows[0]?.id ?? null;
 }
 
@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   if (!query) return sendError(res, 503, 'db_not_configured', 'ยังไม่ได้ตั้งค่าฐานข้อมูล');
 
   try {
-    await ensureBrandOwnership(query);
+    await ensureRangerTables(query);
 
     if (req.method === 'GET') {
       const url = new URL(req.url || '/', 'http://local');
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
       if (!brandId) return res.status(200).json({ messages: [] });
       const rows = await query(
         `SELECT role, agent_id, agent_name, content, attachments, confidence, created_at
-         FROM messages WHERE brand_id = $1 ORDER BY created_at DESC LIMIT $2`, [brandId, limit]);
+         FROM ${MESSAGES_TABLE} WHERE brand_id = $1 ORDER BY created_at DESC LIMIT $2`, [brandId, limit]);
       return res.status(200).json({
         messages: rows.reverse().map(r => ({
           brandId: clientId,
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       ? b.attachments.slice(0, 10).map(a => ({ name: str(a?.name, 255), type: str(a?.type, 100), size: Number(a?.size) || 0 }))
       : [];
     await query(
-      `INSERT INTO messages (brand_id, role, agent_id, agent_name, content, attachments)
+      `INSERT INTO ${MESSAGES_TABLE} (brand_id, role, agent_id, agent_name, content, attachments)
        VALUES ($1, $2, $3, $4, $5, $6::text::jsonb)`,
       [brandId, role, str(b.agentId, 100), str(b.agentName, 255), content, JSON.stringify(attachments)]);
     return res.status(200).json({ ok: true });

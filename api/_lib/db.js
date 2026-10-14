@@ -5,7 +5,7 @@
  * URL: DATABASE_URL (ใหม่) หรือ VITE_DATABASE_URL (ค่าเดิม ยังรองรับระหว่างย้าย)
  *
  * ความเป็นเจ้าของ: แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (owner_key, header x-ranger-user)
- * แต่ละคนอ่าน/แก้ได้เฉพาะแบรนด์ของตัวเอง แบรนด์เก่าที่ไม่มีเจ้าของจะไม่แสดงให้ใครเห็น
+ * แต่ละคนอ่าน/แก้ได้เฉพาะแบรนด์ของตัวเอง
  */
 
 let queryFn = null;
@@ -29,17 +29,65 @@ export function setQuery(fn) {
 }
 
 /**
- * เพิ่มคอลัมน์เจ้าของให้ตาราง brands (ครั้งแรกที่ใช้) — ไม่แตะข้อมูลเดิม
- * แบรนด์เก่า owner_key = NULL จึงไม่มีใครเห็น
+ * ตารางของ AI Rangers ขึ้นต้นด้วย ranger_ ทั้งหมด — ฐานข้อมูลที่ใช้ร่วม (neon-vercel-DB)
+ * มีตาราง messages/users ของแอปอื่นอยู่แล้ว ห้ามแตะตารางที่ไม่ใช่ของเรา
+ * สร้างเองครั้งแรกที่ใช้ (IF NOT EXISTS) — ไม่ต้องรัน migration
  */
-export function ensureBrandOwnership(query) {
+export const BRANDS_TABLE = 'ranger_brands';
+export const MESSAGES_TABLE = 'ranger_messages';
+
+const SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS ${BRANDS_TABLE} (
+    id serial PRIMARY KEY,
+    owner_key text NOT NULL,
+    client_id text NOT NULL,
+    brand_name_en varchar(255) NOT NULL,
+    brand_name_th varchar(255) NOT NULL,
+    industry varchar(255) NOT NULL,
+    business_model varchar(50),
+    core_usp jsonb,
+    competitors jsonb,
+    tax_id varchar(50),
+    company_address text,
+    primary_color varchar(7),
+    secondary_colors jsonb,
+    font_family jsonb,
+    mood_keywords jsonb,
+    video_style text,
+    forbidden_elements jsonb,
+    logo_url text,
+    tone_of_voice varchar(255),
+    target_audience text,
+    target_persona text,
+    pain_points jsonb,
+    multilingual_level varchar(50),
+    forbidden_words jsonb,
+    brand_hashtags jsonb,
+    automation_email varchar(255),
+    automation_line_oa varchar(255),
+    created_at timestamp DEFAULT now() NOT NULL,
+    updated_at timestamp DEFAULT now() NOT NULL,
+    UNIQUE (owner_key, client_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ${MESSAGES_TABLE} (
+    id serial PRIMARY KEY,
+    brand_id integer NOT NULL REFERENCES ${BRANDS_TABLE}(id) ON DELETE CASCADE,
+    role varchar(20) NOT NULL,
+    agent_id varchar(100),
+    agent_name varchar(255),
+    content text NOT NULL,
+    attachments jsonb,
+    confidence integer,
+    validation_results jsonb,
+    created_at timestamp DEFAULT now() NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS ${MESSAGES_TABLE}_brand_created_idx ON ${MESSAGES_TABLE} (brand_id, created_at)`,
+];
+
+export function ensureRangerTables(query) {
   if (!schemaReady) {
     schemaReady = (async () => {
-      await query('ALTER TABLE brands ADD COLUMN IF NOT EXISTS owner_key text');
-      await query('ALTER TABLE brands ADD COLUMN IF NOT EXISTS client_id text');
-      await query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS brands_owner_client_idx
-         ON brands (owner_key, client_id) WHERE owner_key IS NOT NULL`);
+      for (const stmt of SCHEMA_SQL) await query(stmt);
     })().catch(err => { schemaReady = null; throw err; });
   }
   return schemaReady;

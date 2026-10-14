@@ -2,7 +2,8 @@ import { pgTable, text, serial, timestamp, boolean, integer, jsonb, varchar, dat
 import { InferSelectModel } from 'drizzle-orm';
 
 // Brands Table - Core brand information + Brand Knowledge Template (3 Buckets)
-export const brands = pgTable('brands', {
+// ชื่อตารางขึ้นต้น ranger_ — ฐานข้อมูลที่ใช้ร่วมมีตาราง messages ของแอปอื่นอยู่แล้ว
+export const brands = pgTable('ranger_brands', {
   id: serial('id').primaryKey(),
 
   // === STRATEGIST_DATA (Bucket 1) ===
@@ -36,9 +37,9 @@ export const brands = pgTable('brands', {
   automationLineOa: varchar('automation_line_oa', { length: 255 }), // LINE OA ID for notifications
 
   // === OWNERSHIP (api/_lib/db.js) ===
-  // รหัสเครื่องของเจ้าของ + รหัสแบรนด์ฝั่ง browser — แบรนด์เก่าที่ไม่มีเจ้าของจะไม่แสดงให้ใคร
-  ownerKey: text('owner_key'),
-  clientId: text('client_id'),
+  // รหัสเครื่องของเจ้าของ + รหัสแบรนด์ฝั่ง browser (unique คู่กัน)
+  ownerKey: text('owner_key').notNull(),
+  clientId: text('client_id').notNull(),
 
   // === METADATA ===
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -102,7 +103,7 @@ export const designAssets = pgTable('design_assets', {
 export type DesignAsset = InferSelectModel<typeof designAssets>;
 
 // Chat Messages Table - Conversation history
-export const messages = pgTable('messages', {
+export const messages = pgTable('ranger_messages', {
   id: serial('id').primaryKey(),
   brandId: integer('brand_id').notNull().references(() => brands.id, { onDelete: 'cascade' }),
   role: varchar('role', { length: 20 }).notNull(), // 'user' or 'agent'

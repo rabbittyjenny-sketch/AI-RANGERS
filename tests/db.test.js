@@ -41,29 +41,16 @@ describe('without a database', () => {
   });
 });
 
-// Postgres จริง — ตารางตาม schema เดิม (ก่อนมี owner_key) เพื่อทดสอบการ migrate ด้วย
+// Postgres จริง — จำลองฐานข้อมูลที่ใช้ร่วมกับแอปอื่น (มีตาราง messages คนละโครงสร้างอยู่แล้ว)
 const PG_URL = process.env.CREDITS_TEST_PG_URL;
 describe.runIf(PG_URL)('brands & messages ownership (postgres)', () => {
   let sql;
   beforeAll(async () => {
     sql = postgres(PG_URL, { max: 3, onnotice: () => {} });
-    await sql.unsafe(`DROP TABLE IF EXISTS messages, brands`);
-    await sql.unsafe(`CREATE TABLE brands (
-      id serial PRIMARY KEY,
-      brand_name_en varchar(255) NOT NULL, brand_name_th varchar(255) NOT NULL, industry varchar(255) NOT NULL,
-      business_model varchar(50), core_usp jsonb, competitors jsonb, tax_id varchar(50), company_address text,
-      primary_color varchar(7), secondary_colors jsonb, font_family jsonb, mood_keywords jsonb, video_style text,
-      forbidden_elements jsonb, logo_url text, tone_of_voice varchar(255), target_audience text, target_persona text,
-      pain_points jsonb, multilingual_level varchar(50), forbidden_words jsonb, brand_hashtags jsonb,
-      automation_email varchar(255), automation_line_oa varchar(255),
-      created_at timestamp DEFAULT now() NOT NULL, updated_at timestamp DEFAULT now() NOT NULL)`);
+    await sql.unsafe(`DROP TABLE IF EXISTS ranger_messages, ranger_brands, messages, brands`);
     await sql.unsafe(`CREATE TABLE messages (
-      id serial PRIMARY KEY, brand_id integer NOT NULL REFERENCES brands(id) ON DELETE CASCADE,
-      role varchar(20) NOT NULL, agent_id varchar(100), agent_name varchar(255), content text NOT NULL,
-      attachments jsonb, confidence integer, validation_results jsonb, created_at timestamp DEFAULT now() NOT NULL)`);
-    // แบรนด์เก่าที่บันทึกก่อนมีระบบเจ้าของ
-    await sql.unsafe(`INSERT INTO brands (brand_name_en, brand_name_th, industry, tax_id)
-      VALUES ('Legacy', 'แบรนด์เก่า', 'food', '0105555555555')`);
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), conversation_id uuid, role text, content text)`);
+    await sql.unsafe(`INSERT INTO messages (role, content) VALUES ('user', 'ของแอปอื่น')`);
     setQuery((text, params = []) => sql.unsafe(text, params));
   });
   afterAll(async () => { setQuery(null); await sql?.end(); });
@@ -80,10 +67,14 @@ describe.runIf(PG_URL)('brands & messages ownership (postgres)', () => {
     expect((await call(brandsHandler, { uid: 'not-a-uuid' })).statusCode).toBe(400);
   });
 
-  it('never shows legacy ownerless brands to anyone', async () => {
+  it('creates its own ranger_ tables and leaves other apps\' tables alone', async () => {
     const r = await call(brandsHandler, { uid: A });
     expect(r.statusCode).toBe(200);
     expect(r.body.brands).toEqual([]);
+    const tables = await sql`SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'ranger_%' ORDER BY 1`;
+    expect(tables.map(t => t.table_name)).toEqual(expect.arrayContaining(['ranger_brands', 'ranger_messages']));
+    const foreign = await sql`SELECT content FROM messages`;
+    expect(foreign.map(m => m.content)).toEqual(['ของแอปอื่น']);
   });
 
   it('saves a brand once and updates it in place on re-save', async () => {
@@ -118,6 +109,8 @@ describe.runIf(PG_URL)('brands & messages ownership (postgres)', () => {
     expect((await post(stranger, 'แอบเขียน')).statusCode).toBe(404);
     const readStranger = await call(messagesHandler, { uid: stranger, url: '/api/messages?brandId=1791959706078.42' });
     expect(readStranger.body.messages).toEqual([]);
+    // ข้อความเราไม่ไปปนในตาราง messages ของแอปอื่น
+    expect((await sql`SELECT count(*)::int AS n FROM messages`)[0].n).toBe(1);
   });
 
   it('caps brands per owner and rejects incomplete input', async () => {

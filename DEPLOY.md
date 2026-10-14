@@ -44,8 +44,9 @@ model / max_tokens / web search ถูกกำหนดฝั่ง server เ�
 
 ### ฐานข้อมูลและความเป็นเจ้าของแบรนด์
 - browser ไม่ต่อฐานข้อมูลตรงแล้ว — อ่าน/เขียนผ่าน `/api/brands`, `/api/messages`
-- แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (คอลัมน์ `owner_key`, `client_id` — function เพิ่มให้เองครั้งแรก)
-- แบรนด์เก่าที่บันทึกก่อนมีระบบเจ้าของ จะไม่แสดงให้ใครเห็น (ข้อมูลยังอยู่ ไม่ได้ลบ)
+- ตารางของ AI Rangers ขึ้นต้นด้วย `ranger_` ทั้งหมด (`ranger_brands`, `ranger_messages`, `ranger_credit_*`) — function สร้างเองครั้งแรก ไม่ต้องรัน migration
+- ฐานข้อมูล neon-vercel-DB มีตาราง `messages`, `users`, `conversations` ฯลฯ ของแอปเดิมอยู่แล้ว — AI Rangers ไม่อ่าน/เขียนตารางเหล่านั้น **อย่ารัน `drizzle-kit push`** กับฐานนี้ (จะพยายามแก้ตารางที่ไม่ใช่ของเรา)
+- แบรนด์ผูกกับรหัสเครื่องของผู้ใช้ (`owner_key` + `client_id`)
 - **หลังย้ายเสร็จ ให้เปลี่ยนรหัสผ่าน Neon** เพราะ connection string เดิมเคยอยู่ในไฟล์ที่ browser โหลด
 
 ### ระบบเครดิต
