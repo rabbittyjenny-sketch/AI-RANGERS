@@ -54,7 +54,8 @@ export interface DeliverParams {
   userInput: string;
   rawResponse: string;
   context: MasterContext;
-  brandIdNum: number;
+  /** รหัสแบรนด์ (ว่าง = ไม่บันทึกประวัติ) */
+  brandKey: string;
   messages: Array<{ role: 'user' | 'assistant'; content: any }>;
   /** ข้อความต้นฉบับที่ผู้ใช้ส่งมา (ไฟล์แนบ/ข้อความยาว) ใช้ตรวจความคล้าย */
   originalContent?: string;
@@ -175,7 +176,7 @@ export class OrchestratorEngine {
   async processAndDeliver(params: DeliverParams): Promise<DeliverResult> {
     const {
       agentId, agentName, userInput, context,
-      brandIdNum, messages, callClaudeFn, originalContent,
+      brandKey, messages, callClaudeFn, originalContent,
     } = params;
 
     let responseText = params.rawResponse;
@@ -243,10 +244,10 @@ export class OrchestratorEngine {
     }
 
     // ── บันทึก agent response ลง DB (รอผลจริง) ────────────────────────────
-    if (brandIdNum > 0) {
+    if (brandKey) {
       try {
         const agentMsg: MessageRecord = {
-          brandId: brandIdNum,
+          brandId: brandKey,
           role: 'agent',
           agentId,
           agentName,

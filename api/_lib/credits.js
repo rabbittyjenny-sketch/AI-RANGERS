@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { envInt, clientIp } from './claude.js';
+import { getQuery } from './db.js';
 
 export function creditConfig() {
   return {
@@ -208,22 +209,16 @@ export function createMemoryStore() {
 let store = null;
 let memoryFallback = null;
 
-async function neonQuery(url) {
-  const { neon } = await import('@neondatabase/serverless');
-  const sql = neon(url);
-  return (text, params = []) => sql.query(text, params);
-}
-
 /** ใช้ Postgres ถ้ามี URL; ถ้า DB ล่มระหว่างทาง สลับไปใช้หน่วยความจำ (และ log ไว้) */
 export async function getCreditStore() {
   if (store) return store;
-  const url = process.env.DATABASE_URL || process.env.VITE_DATABASE_URL;
-  if (!url) {
+  const query = await getQuery();
+  if (!query) {
     console.warn('[credits] no DATABASE_URL — using in-memory credit store');
     store = createMemoryStore();
     return store;
   }
-  const primary = createSqlStore(await neonQuery(url));
+  const primary = createSqlStore(query);
   memoryFallback = createMemoryStore();
   store = withFallback(primary, memoryFallback);
   return store;
