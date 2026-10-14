@@ -35,6 +35,7 @@ vercel
 | `CHAT_RATE_LIMIT` | `40` | optional — ข้อความต่อ IP ต่อชั่วโมง |
 | `GUARD_AI_ENABLED` | `true` | optional — `false` ปิดตัวตรวจ AI ทันที |
 | `DAILY_CREDITS` | `30` | optional — เครดิตต่อคนต่อวัน (รีเซ็ตเที่ยงคืนเวลาไทย) |
+| `DAILY_FILES` | `3` | optional — แนบไฟล์ได้กี่ไฟล์ต่อคนต่อวัน (0 = ไม่จำกัด) |
 | `DAILY_USER_CAP` | `20` | optional — ผู้ใช้สูงสุดต่อวันทั้งระบบ |
 | `IP_DAILY_USER_LIMIT` | `5` | optional — ผู้ใช้ใหม่ต่อ IP ต่อวัน |
 | `CREDITS_ENABLED` | `true` | optional — `false` ปิดระบบเครดิต |

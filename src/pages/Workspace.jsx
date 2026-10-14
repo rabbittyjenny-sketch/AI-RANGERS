@@ -80,12 +80,12 @@ const renderInline = (text) => {
     });
 };
 /* ─── คำอธิบายการหักเครดิต (ส่วนขยาย) ─── */
-const CreditInfoPanel = ({ limit = 30 }) => (
+const CreditInfoPanel = ({ limit = 30, filesLimit = 3 }) => (
     <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.7, background: 'rgba(94,155,235,0.07)', borderRadius: 12, padding: '9px 13px', margin: '2px 6px 6px' }}>
         <div style={{ fontWeight: 700, marginBottom: 3 }}>เครดิตคิดยังไง?</div>
         <div>• ได้วันละ {limit} เครดิต รีเซ็ตทุกเที่ยงคืน (เวลาไทย) ใช้ไม่หมดไม่สะสม</div>
         <div>• ส่งข้อความแล้วได้คำตอบ = 1 เครดิต</div>
-        <div>• แนบรูปหรือไฟล์ = 2 เครดิต (AI ต้องอ่านข้อมูลมากขึ้น)</div>
+        <div>• แนบรูปหรือไฟล์ = 2 เครดิต (AI ต้องอ่านข้อมูลมากขึ้น) และแนบได้รวมวันละ {filesLimit} ไฟล์</div>
         <div>• ถ้า AI ค้นข้อมูลล่าสุดจากเว็บให้ = เพิ่มอีก 2 เครดิต (ค้นเฉพาะเรื่องที่ต้องใช้ข้อมูลใหม่ และแนบที่มาให้)</div>
         <div>• ไม่หักเครดิต: ระบบขัดข้อง, AI ตอบไม่ได้, และรอบที่ระบบตรวจคุณภาพสั่งให้ AI แก้คำตอบเอง</div>
         <div>• เครดิตผูกกับเบราว์เซอร์/อุปกรณ์ที่ใช้อยู่ ช่วงเปิดทดลองรับผู้ใช้จำนวนจำกัดต่อวัน</div>
@@ -1041,7 +1041,7 @@ const [showTerms, setShowTerms] = useState(!localStorage.getItem('ranger_terms_a
                                     </div>
                                 </div>
 
-                                {showCreditInfo && <CreditInfoPanel limit={creditBalance?.limit || 30} />}
+                                {showCreditInfo && <CreditInfoPanel limit={creditBalance?.limit || 30} filesLimit={creditBalance?.filesLimit || 3} />}
 
                                 {/* Textarea */}
                                 <div style={{ background: BG, borderRadius: 15, ...NEU.inset, margin: '3px 4px 5px' }}>

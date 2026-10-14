@@ -24,6 +24,8 @@ export function creditConfig() {
     dailyCredits: envInt('DAILY_CREDITS', 30),
     // ค้นเว็บจริง = ต้นทุนสูงกว่าข้อความปกติหลายเท่า (ค่าค้น + ผลค้นที่ Claude ต้องอ่าน) จึงหักเพิ่มตามต้นทุน
     searchExtra: envInt('SEARCH_EXTRA_CREDITS', 2),
+    // ไฟล์แนบต่อคนต่อวัน (รูป/ไฟล์ข้อความ นับชิ้นละ 1) — 0 = ไม่จำกัด
+    dailyFiles: envInt('DAILY_FILES', 3),
     dailyUserCap: envInt('DAILY_USER_CAP', 20),
     ipDailyUserLimit: envInt('IP_DAILY_USER_LIMIT', 5),
     retriesPerTurn: 2,
@@ -46,6 +48,15 @@ export function nextResetIso(now = new Date()) {
 }
 
 /** แนบรูปหรือไฟล์ (ข้อความล่าสุดมีมากกว่า 1 block) = 2 เครดิต, อื่นๆ = 1 */
+/** จำนวนไฟล์แนบในข้อความล่าสุด: รูปทุกรูป + ไฟล์ข้อความ (บล็อกที่ขึ้นต้น "[ไฟล์แนบ: ชื่อ]") */
+export function countAttachments(messages) {
+  const last = messages[messages.length - 1];
+  if (!Array.isArray(last?.content)) return 0;
+  return last.content.filter(b =>
+    b?.type === 'image' || (b?.type === 'text' && typeof b.text === 'string' && b.text.startsWith('\n\n[ไฟล์แนบ:'))
+  ).length;
+}
+
 export function creditCost(messages) {
   const last = messages[messages.length - 1];
   return Array.isArray(last?.content) && last.content.length > 1 ? 2 : 1;
@@ -70,6 +81,7 @@ const INIT_SQL = [
      created_at timestamptz NOT NULL DEFAULT now(),
      PRIMARY KEY (day, user_key)
    )`,
+  `ALTER TABLE ranger_credit_usage ADD COLUMN IF NOT EXISTS files integer NOT NULL DEFAULT 0`,
   `CREATE TABLE IF NOT EXISTS ranger_credit_turns (
      turn_id text PRIMARY KEY,
      user_key text NOT NULL,
@@ -98,12 +110,13 @@ export function createSqlStore(query) {
 
     async peek({ userKey, day, cfg }) {
       await init();
-      const rows = await query('SELECT used FROM ranger_credit_usage WHERE day = $1 AND user_key = $2', [day, userKey]);
+      const rows = await query('SELECT used, files FROM ranger_credit_usage WHERE day = $1 AND user_key = $2', [day, userKey]);
       const used = rows[0] ? Number(rows[0].used) : 0;
-      return { used, remaining: Math.max(cfg.dailyCredits - used, 0) };
+      const files = rows[0] ? Number(rows[0].files) : 0;
+      return { used, remaining: Math.max(cfg.dailyCredits - used, 0), files };
     },
 
-    async reserve({ userKey, ip, cost, day, cfg }) {
+    async reserve({ userKey, ip, cost, files = 0, day, cfg }) {
       await init();
       const existing = await query('SELECT used FROM ranger_credit_usage WHERE day = $1 AND user_key = $2', [day, userKey]);
       if (existing.length === 0) {
@@ -117,23 +130,27 @@ export function createSqlStore(query) {
           [day, userKey, ip]);
       }
       // จองแบบ atomic — ไม่เกินโควต้าแม้ส่งพร้อมกันหลายข้อความ
+      const fileLimit = cfg.dailyFiles ?? 0;
       const rows = await query(
-        `UPDATE ranger_credit_usage SET used = used + $3
-         WHERE day = $1 AND user_key = $2 AND used + $3 <= $4
-         RETURNING used`,
-        [day, userKey, cost, cfg.dailyCredits]);
+        `UPDATE ranger_credit_usage SET used = used + $3, files = files + $5
+         WHERE day = $1 AND user_key = $2 AND used + $3 <= $4 AND ($6 <= 0 OR files + $5 <= $6)
+         RETURNING used, files`,
+        [day, userKey, cost, cfg.dailyCredits, files, fileLimit]);
       if (rows.length === 0) {
-        const cur = await query('SELECT used FROM ranger_credit_usage WHERE day = $1 AND user_key = $2', [day, userKey]);
-        return { ok: false, reason: 'quota_exceeded', used: cur[0] ? Number(cur[0].used) : 0 };
+        const cur = await query('SELECT used, files FROM ranger_credit_usage WHERE day = $1 AND user_key = $2', [day, userKey]);
+        const used = cur[0] ? Number(cur[0].used) : 0;
+        const have = cur[0] ? Number(cur[0].files) : 0;
+        const reason = fileLimit > 0 && have + files > fileLimit ? 'file_limit' : 'quota_exceeded';
+        return { ok: false, reason, used, files: have };
       }
-      return { ok: true, used: Number(rows[0].used) };
+      return { ok: true, used: Number(rows[0].used), files: Number(rows[0].files) };
     },
 
-    async refund({ userKey, cost, day }) {
+    async refund({ userKey, cost, files = 0, day }) {
       await init();
       await query(
-        'UPDATE ranger_credit_usage SET used = GREATEST(used - $3, 0) WHERE day = $1 AND user_key = $2',
-        [day, userKey, cost]);
+        'UPDATE ranger_credit_usage SET used = GREATEST(used - $3, 0), files = GREATEST(files - $4, 0) WHERE day = $1 AND user_key = $2',
+        [day, userKey, cost, files]);
     },
 
     async openTurn({ userKey, day }) {
@@ -166,11 +183,12 @@ export function createMemoryStore() {
     kind: 'memory',
 
     async peek({ userKey, day, cfg }) {
-      const used = usage.get(key(day, userKey))?.used || 0;
-      return { used, remaining: Math.max(cfg.dailyCredits - used, 0) };
+      const row = usage.get(key(day, userKey));
+      const used = row?.used || 0;
+      return { used, remaining: Math.max(cfg.dailyCredits - used, 0), files: row?.files || 0 };
     },
 
-    async reserve({ userKey, ip, cost, day, cfg }) {
+    async reserve({ userKey, ip, cost, files = 0, day, cfg }) {
       let row = usage.get(key(day, userKey));
       if (!row) {
         const today = [...usage.entries()].filter(([k]) => k.startsWith(`${day}|`)).map(([, v]) => v);
@@ -178,17 +196,23 @@ export function createMemoryStore() {
         if (cfg.ipDailyUserLimit > 0 && today.filter(v => v.ip === ip).length >= cfg.ipDailyUserLimit) {
           return { ok: false, reason: 'ip_user_limit', used: 0 };
         }
-        row = { used: 0, ip };
+        row = { used: 0, files: 0, ip };
         usage.set(key(day, userKey), row);
       }
-      if (row.used + cost > cfg.dailyCredits) return { ok: false, reason: 'quota_exceeded', used: row.used };
+      const fileLimit = cfg.dailyFiles ?? 0;
+      if (fileLimit > 0 && row.files + files > fileLimit) return { ok: false, reason: 'file_limit', used: row.used, files: row.files };
+      if (row.used + cost > cfg.dailyCredits) return { ok: false, reason: 'quota_exceeded', used: row.used, files: row.files };
       row.used += cost;
-      return { ok: true, used: row.used };
+      row.files += files;
+      return { ok: true, used: row.used, files: row.files };
     },
 
-    async refund({ userKey, cost, day }) {
+    async refund({ userKey, cost, files = 0, day }) {
       const row = usage.get(key(day, userKey));
-      if (row) row.used = Math.max(row.used - cost, 0);
+      if (row) {
+        row.used = Math.max(row.used - cost, 0);
+        row.files = Math.max(row.files - files, 0);
+      }
     },
 
     async openTurn({ userKey, day }) {

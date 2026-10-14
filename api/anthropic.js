@@ -38,6 +38,7 @@ import {
   bangkokDay,
   nextResetIso,
   creditCost,
+  countAttachments,
   userKeyFrom,
 } from './_lib/credits.js';
 
@@ -49,7 +50,7 @@ const CREDIT_MESSAGES = {
 
 const MAX_MESSAGES = 30;
 const MAX_SYSTEM_CHARS = 30000;
-const MAX_TEXT_CHARS = 60000;
+const MAX_TEXT_CHARS = 200000; // เพดานกันข้อความใหญ่ผิดปกติ (ประมาณ 100k token) — เพดานจริงของไฟล์แนบคือจำนวนไฟล์ต่อวัน
 const MAX_PAUSE_CONTINUATIONS = 3;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
@@ -168,7 +169,12 @@ export default async function handler(req, res) {
   const retryTurnId = typeof req.body?.turnId === 'string' ? req.body.turnId : null;
   let store = null;
   let charged = 0;
+  let filesCharged = 0;
   let credits = null;
+  const balance = (cost, used, files) => ({
+    cost, used, remaining: Math.max(cfg.dailyCredits - used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso(),
+    filesUsed: files, filesLimit: cfg.dailyFiles,
+  });
 
   if (cfg.enabled) {
     store = await getCreditStore();
@@ -177,15 +183,20 @@ export default async function handler(req, res) {
       if (!allowed) return sendError(res, 429, 'retry_not_allowed', 'ไม่สามารถสร้างคำตอบใหม่ได้');
     } else {
       const cost = creditCost(parsed.messages);
-      const r = await store.reserve({ userKey, ip, cost, day, cfg });
+      const files = countAttachments(parsed.messages);
+      const r = await store.reserve({ userKey, ip, cost, files, day, cfg });
       if (!r.ok) {
         return res.status(429).json({
-          error: { code: r.reason, message: CREDIT_MESSAGES[r.reason] },
-          credits: { cost: 0, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() },
+          error: {
+            code: r.reason,
+            message: r.reason === 'file_limit' ? `แนบไฟล์ได้วันละ ${cfg.dailyFiles} ไฟล์ วันนี้ครบแล้ว` : CREDIT_MESSAGES[r.reason],
+          },
+          credits: balance(0, r.used, r.files ?? 0),
         });
       }
       charged = cost;
-      credits = { cost, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0), limit: cfg.dailyCredits, resetsAt: nextResetIso() };
+      filesCharged = files;
+      credits = balance(cost, r.used, r.files ?? files);
     }
   }
 
@@ -217,7 +228,7 @@ export default async function handler(req, res) {
 
     // ไม่ได้คำตอบที่ใช้ได้ (ปฏิเสธ/ว่าง) — คืนเครดิต
     if (charged && (response.stop_reason === 'refusal' || !text.trim())) {
-      await store.refund({ userKey, cost: charged, day });
+      await store.refund({ userKey, cost: charged, files: filesCharged, day });
       credits = null;
     }
     // ค้นเว็บจริงในข้อความนี้ → หักเพิ่มตามต้นทุนจริง (เท่าที่เหลือ ไม่ติดลบ)
@@ -227,7 +238,7 @@ export default async function handler(req, res) {
         const r = await store.reserve({ userKey, ip, cost: extra, day, cfg });
         if (r.ok) {
           charged += extra;
-          credits = { ...credits, cost: charged, used: r.used, remaining: Math.max(cfg.dailyCredits - r.used, 0) };
+          credits = balance(charged, r.used, r.files ?? credits.filesUsed);
         }
       }
     }
@@ -245,7 +256,7 @@ export default async function handler(req, res) {
       turnId,
     });
   } catch (err) {
-    if (charged) await store.refund({ userKey, cost: charged, day }).catch(() => {});
+    if (charged) await store.refund({ userKey, cost: charged, files: filesCharged, day }).catch(() => {});
     const e = toErrorPayload(err);
     console.error('[api/anthropic]', e.code, err?.status, String(err?.message || '').slice(0, 300));
     return sendError(res, e.status, e.code, e.message);

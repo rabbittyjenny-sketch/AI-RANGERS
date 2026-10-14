@@ -216,6 +216,48 @@ describe('daily credits on /api/anthropic', () => {
     expect(r2.body.credits).toMatchObject({ cost: 2, used: 3, remaining: 27 });
   });
 
+  const txt = (name) => ({ type: 'text', text: `\n\n[ไฟล์แนบ: ${name}]\nเนื้อหา` });
+
+  it('allows 3 attachments a day, counting every image and text file, and refuses the 4th without charging', async () => {
+    create.mockResolvedValue(ok);
+    const withFiles = (...files) => ({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'ดู' }, ...files] }] });
+    expect((await send(withFiles(img, txt('a.txt')))).body.credits).toMatchObject({ cost: 2, used: 2, filesUsed: 2, filesLimit: 3 });
+    expect((await send(withFiles(txt('b.txt')))).body.credits).toMatchObject({ used: 4, filesUsed: 3 });
+    const calls = create.mock.calls.length;
+    const blocked = await send(withFiles(img));
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.body.error.code).toBe('file_limit');
+    expect(blocked.body.error.message).toContain('3 ไฟล์');
+    expect(blocked.body.credits).toMatchObject({ cost: 0, used: 4, filesUsed: 3 });
+    expect(create).toHaveBeenCalledTimes(calls); // ไม่เรียก Claude และไม่หักเครดิต
+    // ข้อความไม่แนบไฟล์ยังส่งได้ตามปกติ
+    expect((await send(okBody)).statusCode).toBe(200);
+  });
+
+  it('does not count a plain text message, and a big text file is not cut by a character cap', async () => {
+    create.mockResolvedValue(ok);
+    const big = { type: 'text', text: '\n\n[ไฟล์แนบ: big.txt]\n' + 'ก'.repeat(100000) };
+    const r = await send({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'ดู' }, big] }] });
+    expect(r.statusCode).toBe(200);
+    expect(r.body.credits.filesUsed).toBe(1);
+  });
+
+  it('gives the files back when the answer is refunded', async () => {
+    create.mockResolvedValueOnce({ content: [], stop_reason: 'refusal', usage: {} });
+    await send({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'ดู' }, img, img] }] });
+    const bal = mockRes();
+    await creditsHandler(mockReq(undefined, { 'x-ranger-user': UID }, 'GET'), bal);
+    expect(bal.body).toMatchObject({ used: 0, filesUsed: 0, filesLimit: 3 });
+  });
+
+  it('DAILY_FILES=0 means no file limit', async () => {
+    process.env.DAILY_FILES = '0';
+    create.mockResolvedValue(ok);
+    for (let i = 0; i < 4; i++) {
+      expect((await send({ system: 's', messages: [{ role: 'user', content: [{ type: 'text', text: 'ดู' }, img] }] })).statusCode).toBe(200);
+    }
+  });
+
   it('charges +2 only when Claude really searched the web, never below zero', async () => {
     const searched = { content: [{ type: 'text', text: 'ตอบ' }], stop_reason: 'end_turn', usage: { server_tool_use: { web_search_requests: 1 } } };
     create.mockResolvedValue(ok);
