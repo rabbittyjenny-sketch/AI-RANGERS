@@ -93,8 +93,40 @@ describe('/api/anthropic', () => {
     expect(sent.model).toBe('claude-sonnet-4-6');
     expect(sent.max_tokens).toBe(4096);
     expect(sent.output_config).toBeUndefined(); // ไม่ส่ง effort เหมือนก่อนหน้า
-    expect(sent.tools).toBeUndefined(); // web search ปิดเป็นค่าเริ่มต้น
+    expect(sent.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }]); // ค้นหาข้อมูลภายนอกได้ ไม่เกิน 2 ครั้งต่อข้อความ
     expect(sent.temperature).toBeUndefined();
+  });
+
+  it('web search can be switched off with WEB_SEARCH_MAX_USES=0', () => {
+    process.env.WEB_SEARCH_MAX_USES = '0';
+    expect(buildChatRequest('SYS', [{ role: 'user', content: 'q' }]).tools).toBeUndefined();
+  });
+
+  it('returns only real cited sources (deduped, max 3) and never invents any', async () => {
+    const cite = (url, title) => ({ type: 'web_search_result_location', url, title, cited_text: 'x' });
+    create.mockResolvedValue({
+      content: [
+        { type: 'server_tool_use', name: 'web_search', input: { query: 'q' } },
+        { type: 'text', text: 'ตลาดโต ', citations: [cite('https://a.com/1', 'A'), cite('https://a.com/1', 'A again')] },
+        { type: 'text', text: 'ต่อเนื่อง', citations: [cite('https://b.com/2', 'B'), cite('ftp://bad', 'bad'), cite('https://c.com/3', 'C'), cite('https://d.com/4', 'D')] },
+      ],
+      stop_reason: 'end_turn', model: 'claude-sonnet-4-6', usage: { server_tool_use: { web_search_requests: 1 } },
+    });
+    const res = mockRes();
+    await chatHandler(mockReq(okBody), res);
+    expect(res.body.text).toBe('ตลาดโต ต่อเนื่อง');
+    expect(res.body.sources).toEqual([
+      { title: 'A', url: 'https://a.com/1' },
+      { title: 'B', url: 'https://b.com/2' },
+      { title: 'C', url: 'https://c.com/3' },
+    ]);
+  });
+
+  it('returns no sources when Claude did not search', async () => {
+    create.mockResolvedValue({ content: [{ type: 'text', text: 'ตอบเอง' }], stop_reason: 'end_turn', model: 'm', usage: {} });
+    const res = mockRes();
+    await chatHandler(mockReq(okBody), res);
+    expect(res.body.sources).toEqual([]);
   });
 
   it('marks system prompt and last message for prompt caching', () => {

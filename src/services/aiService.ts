@@ -98,6 +98,19 @@ export async function fetchCreditBalance(): Promise<(Omit<CreditInfo, 'cost'> & 
 
 const API_ERROR_PREFIX = '⚠️ ยังตอบไม่ได้ในขณะนี้';
 
+/** แหล่งอ้างอิงจริงจากผลค้นเว็บ (server ส่งมาจาก citations) — บรรทัดเดียว ไม่แนบลิงก์ยาว */
+export function formatSources(sources: unknown): string {
+  if (!Array.isArray(sources) || sources.length === 0) return '';
+  const items: string[] = [];
+  for (const s of sources.slice(0, 3)) {
+    let host = '';
+    try { host = new URL(String((s as any)?.url)).hostname.replace(/^www\./, ''); } catch { continue; }
+    const title = String((s as any)?.title || '').trim().slice(0, 50);
+    items.push(title ? `${title} (${host})` : host);
+  }
+  return items.length ? `\n\n📚 ที่มา: ${items.join(' · ')}` : '';
+}
+
 /** ข้อความแจ้งผู้ใช้เมื่อเรียก Claude ไม่สำเร็จ — บอกสาเหตุจริง ไม่ใช่คำตอบปลอม */
 export function buildApiErrorMessage(code: string): string {
   const reasons: Record<string, string> = {
@@ -291,7 +304,8 @@ class AIService {
     msg += `\n4. สร้าง output ที่ copy ไปใช้งานได้เลย ไม่ใช่แค่ทฤษฎี`;
     msg += `\n5. ถามทีละ 1-2 คำถาม ไม่ถามทีเดียวหลายข้อ`;
     msg += `\n6. ตอบตรงๆ กระชับ ไม่เกริ่นยาว`;
-    msg += `\n7. ห้ามแต่งตัวเลขสถิติหรือผลวิจัย ถ้าจะอ้างตัวเลขต้องบอกแหล่งที่มา หรือบอกว่าเป็นการประมาณการ`;
+    msg += `\n7. ข้อมูลที่เปลี่ยนตามเวลา (ตัวเลขตลาด เทรนด์ ราคา กฎเกณฑ์) ให้ใช้ web search หาข้อมูลจริง แล้วสรุปเป็นคำตอบสั้นตามรูปแบบของคุณ ห้ามคัดลอกยาว ห้ามค้นทุกคำถาม และระบบจะแนบแหล่งที่มาให้เอง ไม่ต้องเขียนแหล่งที่มาซ้ำ`;
+    msg += `\n8. ห้ามเดาหรือแต่งตัวเลข สถิติ หรือผลวิจัย ใช้เฉพาะข้อมูลที่ผู้ใช้ให้หรือที่ค้นเจอจริง ถ้าไม่มีข้อมูลให้บอกตรงๆ`;
 
     return msg;
   }
@@ -414,7 +428,7 @@ class AIService {
       if (data?.stopReason === 'refusal') throw new ClaudeApiError('refusal', 'refused');
       const text = typeof data?.text === 'string' ? data.text.trim() : '';
       if (!text) throw new ClaudeApiError('empty', `empty response (${data?.stopReason})`);
-      return { text, credits: data?.credits || undefined, turnId: data?.turnId || undefined };
+      return { text: text + formatSources(data?.sources), credits: data?.credits || undefined, turnId: data?.turnId || undefined };
     } finally {
       clearTimeout(timeout);
     }

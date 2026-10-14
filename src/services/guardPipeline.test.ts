@@ -6,7 +6,7 @@ vi.mock('./databaseService', () => ({
 
 import { dataGuardian, isolationGuard, antiCopycatGuard, textSimilarity } from './dataGuardService';
 import { orchestratorEngine, GUARD_BADGE_MARKER, stripGuardBadge } from './orchestratorEngine';
-import { aiService } from './aiService';
+import { aiService, formatSources } from './aiService';
 
 type Verdict = 'pass' | 'warn' | 'fail';
 function aiVerdicts(over: Partial<Record<string, [Verdict, string]>> = {}) {
@@ -224,6 +224,30 @@ describe('aiService.sendMessage', () => {
     const chatBodies = f.mock.calls.filter(c => c[0] === '/api/anthropic').map(c => JSON.parse(c[1].body));
     expect(chatBodies[0].turnId).toBeUndefined();
     expect(chatBodies[1].turnId).toBe('turn-1');
+  });
+
+  it('appends the real sources in one short line, and the guard checks the answer together with them', async () => {
+    const f = installFetch({
+      chat: [jsonResponse(200, {
+        text: 'ตลาดกาแฟโตต่อเนื่อง', stopReason: 'end_turn',
+        sources: [{ title: 'Coffee Market Report', url: 'https://www.example.com/report' }, { title: '', url: 'https://news.test/a' }],
+      })],
+    });
+    const r = await aiService.sendMessage('marketing', 'ตลาดกาแฟเป็นยังไง', [], brandCtx as any);
+    const answer = 'ตลาดกาแฟโตต่อเนื่อง\n\n📚 ที่มา: Coffee Market Report (example.com) · news.test';
+    expect(r.text.startsWith(answer + GUARD_BADGE_MARKER)).toBe(true);
+    const guardBody = JSON.parse(f.mock.calls.find(c => c[0] === '/api/guard')![1].body);
+    expect(guardBody.content).toBe(answer);
+  });
+
+  it('formatSources: nothing without sources, skips bad urls, at most 3, no links', () => {
+    expect(formatSources(undefined)).toBe('');
+    expect(formatSources([])).toBe('');
+    expect(formatSources([{ title: 'x', url: 'not a url' }])).toBe('');
+    const four = ['a', 'b', 'c', 'd'].map(h => ({ title: h.toUpperCase(), url: `https://${h}.com/p` }));
+    const out = formatSources(four);
+    expect(out).toBe('\n\n📚 ที่มา: A (a.com) · B (b.com) · C (c.com)');
+    expect(out).not.toContain('http');
   });
 
   it('explains a used-up daily quota', async () => {

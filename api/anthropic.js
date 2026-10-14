@@ -11,7 +11,7 @@
  *   CLAUDE_MODEL          default claude-sonnet-4-6 (โมเดลที่ใช้มาตลอด — Haiku ตอบคุณภาพไม่พอ)
  *   CLAUDE_EFFORT         low | medium | high | none   (default none = ไม่ส่ง effort เหมือนเดิม)
  *   CHAT_MAX_TOKENS       default 4096
- *   WEB_SEARCH_MAX_USES   default 0 = ปิด (งานของ Ranger เป็นงานเขียน/วางแผน ไม่ต้องค้นเว็บ)
+ *   WEB_SEARCH_MAX_USES   default 2 ครั้งต่อข้อความ (0 = ปิด) — แนบแหล่งอ้างอิงจริงของผลค้นท้ายคำตอบ
  *   CHAT_RATE_LIMIT       ข้อความต่อ IP ต่อชั่วโมง, default 40 (0 = ไม่จำกัด)
  *   ALLOWED_ORIGINS       origin เพิ่มเติมที่อนุญาต คั่นด้วย comma
  *   DAILY_CREDITS / DAILY_USER_CAP / IP_DAILY_USER_LIMIT / CREDITS_ENABLED — ดู api/_lib/credits.js
@@ -30,6 +30,7 @@ import {
   toErrorPayload,
   sendError,
   extractText,
+  extractSources,
 } from './_lib/claude.js';
 import {
   creditConfig,
@@ -135,7 +136,7 @@ export function buildChatRequest(system, messages) {
   const effort = process.env.CLAUDE_EFFORT || 'none';
   if (effort !== 'none') request.output_config = { effort };
 
-  const searchUses = envInt('WEB_SEARCH_MAX_USES', 0);
+  const searchUses = envInt('WEB_SEARCH_MAX_USES', 2);
   if (searchUses > 0) {
     request.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: searchUses }];
   }
@@ -195,6 +196,7 @@ export default async function handler(req, res) {
     const client = getClient();
     let response;
     let text = '';
+    const sources = [];
     for (let i = 0; i <= MAX_PAUSE_CONTINUATIONS; i++) {
       response = await client.messages.create(request, { timeout: 75_000, maxRetries: 1 });
       const u = response.usage || {};
@@ -204,6 +206,9 @@ export default async function handler(req, res) {
       usage.cache_creation_input_tokens += u.cache_creation_input_tokens || 0;
       usage.web_search_requests += u.server_tool_use?.web_search_requests || 0;
       text += extractText(response.content);
+      for (const s of extractSources(response.content)) {
+        if (sources.length < 3 && !sources.some(x => x.url === s.url)) sources.push(s);
+      }
 
       if (response.stop_reason !== 'pause_turn') break;
       // web search ที่ใช้เวลานาน — ส่ง assistant content กลับไปให้ทำต่อ
@@ -219,6 +224,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       text,
+      sources,
       stopReason: response.stop_reason,
       model: response.model,
       usage,
